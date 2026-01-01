@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Optional
 
 from tokenizers import Regex
 from tokenizers import Tokenizer as HFTokenizer
@@ -101,8 +100,8 @@ class Tokenizer(PreTrainedTokenizerFast):
 
     def __init__(
         self,
-        vocab_file: Optional[str] = None,
-        tokenizer_file: Optional[str] = None,
+        vocab_file: str | None = None,
+        tokenizer_file: str | None = None,
         bos_token: str = "<cls>",
         eos_token: str = "<eos>",
         unk_token: str = "<unk>",
