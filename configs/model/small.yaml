@@ -1,0 +1,16 @@
+vocab_size: 32
+padding_idx: 1
+
+d_model: 128
+n_layers: 4
+n_heads: 2
+head_dim: 64
+d_ffn: null
+
+max_seq_len: 320
+max_timesteps: 100
+use_timestep_embedding: false
+
+dropout: 0.1
+attention_dropout: 0.1
+embedding_dropout: 0.1

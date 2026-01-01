@@ -1,0 +1,11 @@
+defaults:
+  - model: base
+  - training: default
+  - data: default
+  - diffusion: cosine
+  - logging: wandb
+  - _self_
+
+name: dab_experiment
+seed: 42
+output_dir: outputs/${name}
