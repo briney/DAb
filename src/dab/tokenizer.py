@@ -119,6 +119,7 @@ class Tokenizer(PreTrainedTokenizerFast):
                 unk_token=unk_token,
                 pad_token=pad_token,
                 mask_token=mask_token,
+                clean_up_tokenization_spaces=False,
                 **kwargs,
             )
             return
@@ -174,6 +175,7 @@ class Tokenizer(PreTrainedTokenizerFast):
             unk_token=unk_token,
             pad_token=pad_token,
             mask_token=mask_token,
+            clean_up_tokenization_spaces=False,
             **kwargs,
         )
 
