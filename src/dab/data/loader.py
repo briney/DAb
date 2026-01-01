@@ -190,7 +190,13 @@ def create_train_dataloader(
     train_cfg = cfg.train
 
     if train_cfg is None:
-        raise ValueError("data.train is required")
+        raise ValueError(
+            "Training data is required but data.train is not configured.\n"
+            "Specify training data via:\n"
+            "  - Config file: Set data.train in configs/data/default.yaml\n"
+            "  - CLI override: dab train data.train=/path/to/train.csv\n"
+            "  - Multi-dataset: dab train +data.train.main.path=/path/to/data.csv"
+        )
 
     # Common parameters from config
     common_params = {

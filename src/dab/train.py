@@ -16,9 +16,7 @@ from .utils import set_seed
 
 
 def run_training(
-    config_path: str | None = None,
-    config_dir: str = "configs",
-    train: str | None = None,
+    config: str = "configs",
     output_dir: str = "outputs",
     name: str = "dab_experiment",
     resume_from: str | None = None,
@@ -30,13 +28,10 @@ def run_training(
 
     Parameters
     ----------
-    config_path
-        Optional path to a specific config file.
-    config_dir
-        Directory containing Hydra configs.
-    train
-        Path to training data (single dataset). For multi-dataset,
-        configure via data.train in config or overrides.
+    config
+        Path to config file (.yaml/.yml) or config directory. If a file is
+        provided, its parent directory is used as the config directory.
+        Defaults to "configs" directory.
     output_dir
         Output directory for checkpoints and logs.
     name
@@ -48,21 +43,27 @@ def run_training(
     use_wandb
         Whether to enable WandB logging.
     overrides
-        List of Hydra config overrides.
+        List of Hydra config overrides (including data.train for training data).
     """
-    config_dir_path = Path(config_dir).absolute()
+    config_path = Path(config).absolute()
 
-    with initialize_config_dir(config_dir=str(config_dir_path), version_base=None):
+    # Determine if config is a file or directory
+    if config_path.is_file():
+        # Config file provided - use parent as config dir
+        config_dir = config_path.parent
+        config_name = config_path.stem
+    else:
+        # Config directory provided
+        config_dir = config_path
+        config_name = "config"
+
+    with initialize_config_dir(config_dir=str(config_dir), version_base=None):
         override_list = overrides or []
         override_list.extend(
             [f"name={name}", f"seed={seed}", f"output_dir={output_dir}"]
         )
 
-        # Handle CLI override for train path
-        if train:
-            override_list.append(f"data.train={train}")
-
-        cfg = compose(config_name="config", overrides=override_list)
+        cfg = compose(config_name=config_name, overrides=override_list)
 
     print(OmegaConf.to_yaml(cfg))
 
@@ -166,14 +167,21 @@ def run_training(
 
 
 def main() -> None:
-    """Entry point for `accelerate launch -m dab.train`."""
+    """Entry point for `accelerate launch -m dab.train`.
+
+    Training data must be specified via config overrides, e.g.:
+        accelerate launch -m dab.train data.train=/path/to/train.csv
+    """
     import argparse
 
-    parser = argparse.ArgumentParser(description="Train a DAb model")
-    parser.add_argument(
-        "--train", "-t", required=True, help="Training data path (single dataset)"
+    parser = argparse.ArgumentParser(
+        description="Train a DAb model",
+        epilog="Training data must be specified via override: data.train=/path/to/data.csv",
     )
-    parser.add_argument("--config-dir", default="configs", help="Config directory")
+    parser.add_argument(
+        "--config", "-c", default="configs",
+        help="Config file (.yaml) or config directory (default: configs)",
+    )
     parser.add_argument("--output-dir", "-o", default="outputs", help="Output directory")
     parser.add_argument("--name", "-n", default="dab_experiment", help="Experiment name")
     parser.add_argument("--resume", default=None, help="Checkpoint to resume from")
@@ -183,8 +191,7 @@ def main() -> None:
     args, unknown = parser.parse_known_args()
 
     run_training(
-        config_dir=args.config_dir,
-        train=args.train,
+        config=args.config,
         output_dir=args.output_dir,
         name=args.name,
         resume_from=args.resume,

@@ -37,10 +37,11 @@ mypy src/dab/
 ## CLI Commands
 
 ```bash
-# Training
-dab train -t data/train.csv                    # Basic training
-dab train -t data.csv model=small              # Use small model config
-dab train -t data.csv train.batch_size=64      # Override config values
+# Training (data path specified via config override)
+dab train data.train=data/train.csv                    # Basic training
+dab train data.train=data.csv model=small              # Use small model config
+dab train -c my_config.yaml data.train=data.csv        # Use custom config file
+dab train -c /path/to/configs data.train=data.csv      # Use custom config dir
 
 # Encoding/inference
 dab encode -c checkpoint.pt -i sequences.csv -o embeddings.pt
@@ -61,7 +62,7 @@ dab encode -c checkpoint.pt -i sequences.csv -o embeddings.pt
 
 Configs in `configs/` use Hydra's compose pattern:
 - `configs/config.yaml` - Main entry point, composes sub-configs
-- Override via CLI: `dab train -t data.csv model=large train=debug`
+- Override via CLI: `dab train data.train=data.csv model=large train=debug`
 
 ### Key Entry Points
 

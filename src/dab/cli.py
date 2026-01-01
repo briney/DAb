@@ -18,20 +18,11 @@ def main() -> None:
 
 @main.command()
 @click.option(
-    "--config", "-c", type=click.Path(exists=True), help="Path to config file"
-)
-@click.option(
-    "--config-dir",
+    "--config",
+    "-c",
     type=click.Path(exists=True),
     default="configs",
-    help="Config directory",
-)
-@click.option(
-    "--train",
-    "-t",
-    type=click.Path(exists=True),
-    required=True,
-    help="Training data path (single dataset)",
+    help="Config file (.yaml) or config directory (default: configs)",
 )
 @click.option(
     "--output-dir", "-o", type=click.Path(), default="outputs", help="Output directory"
@@ -44,9 +35,7 @@ def main() -> None:
 @click.option("--wandb/--no-wandb", default=True, help="Enable/disable WandB")
 @click.argument("overrides", nargs=-1)
 def train(
-    config: str | None,
-    config_dir: str,
-    train: str,
+    config: str,
     output_dir: str,
     name: str,
     resume: str | None,
@@ -56,21 +45,21 @@ def train(
 ) -> None:
     """Train a DAb model.
 
+    Training data must be specified in the config file (data.train) or via
+    command-line override (data.train=/path/to/data.csv).
+
     Examples:
 
-        dab train --train data/train.csv
+        dab train data.train=/path/to/train.csv
 
-        dab train -t data/train.csv model=small train.batch_size=64
+        dab train -c my_config.yaml data.train=/path/to/train.csv
 
-        # Multi-dataset via config override:
-        dab train -t data/train.csv +data.train.extra.path=data/extra.parquet +data.train.extra.fraction=0.3
+        dab train -c /path/to/configs data.train=/path/to/train.csv model=small
     """
     from .train import run_training
 
     run_training(
-        config_path=config,
-        config_dir=config_dir,
-        train=train,
+        config=config,
         output_dir=output_dir,
         name=name,
         resume_from=resume,
