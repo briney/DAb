@@ -14,6 +14,7 @@ from transformers import PreTrainedTokenizerFast
 
 __all__ = [
     "Tokenizer",
+    "tokenizer",
     "DEFAULT_VOCAB",
     "AA_START_IDX",
     "AA_END_IDX",
@@ -185,6 +186,108 @@ class Tokenizer(PreTrainedTokenizerFast):
     def cls_token(self) -> str:
         """Get the CLS token (alias for bos_token)."""
         return self.bos_token
+
+    def encode_paired(
+        self,
+        heavy_chain: str,
+        light_chain: str,
+        add_chain_separator: bool = False,
+        return_tensors: str | None = None,
+    ) -> dict[str, list[int]]:
+        """
+        Encode paired heavy/light chain sequences.
+
+        When using ChainAwareAttention (add_chain_separator=False):
+            Format: <cls> heavy_chain light_chain <eos>
+            Chain IDs: [0, 0, 0, ..., 1, 1, 1, ..., 1]
+
+        When using MultiHeadAttention (add_chain_separator=True):
+            Format: <cls> heavy_chain <cls> light_chain <eos>
+            Chain IDs: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1]
+            The separating <cls> acts as a boundary marker between chains.
+
+        Parameters
+        ----------
+        heavy_chain
+            Amino acid sequence of the heavy chain.
+        light_chain
+            Amino acid sequence of the light chain.
+        add_chain_separator
+            If True, add a <cls> token between chains (for MultiHeadAttention).
+            If False, no separator is added (for ChainAwareAttention).
+        return_tensors
+            If "pt", return PyTorch tensors. If None, return lists.
+
+        Returns
+        -------
+        dict
+            Dictionary with:
+            - "input_ids": Token IDs
+            - "chain_ids": Chain identity (0 for heavy, 1 for light)
+            - "attention_mask": Attention mask (all 1s)
+
+        Examples
+        --------
+        >>> tokenizer = Tokenizer()
+        >>> result = tokenizer.encode_paired("AC", "DE", add_chain_separator=False)
+        >>> result["input_ids"]
+        [0, 5, 23, 13, 9, 2]  # <cls> A C D E <eos>
+        >>> result["chain_ids"]
+        [0, 0, 0, 1, 1, 1]
+
+        >>> result = tokenizer.encode_paired("AC", "DE", add_chain_separator=True)
+        >>> result["input_ids"]
+        [0, 5, 23, 0, 13, 9, 2]  # <cls> A C <cls> D E <eos>
+        >>> result["chain_ids"]
+        [0, 0, 0, 0, 1, 1, 1]
+        """
+        # Encode each chain without special tokens
+        heavy_ids = self.encode(heavy_chain, add_special_tokens=False)
+        light_ids = self.encode(light_chain, add_special_tokens=False)
+
+        # Build token sequence
+        if add_chain_separator:
+            # <cls> heavy <cls> light <eos>
+            input_ids = (
+                [self.cls_token_id]
+                + heavy_ids
+                + [self.cls_token_id]
+                + light_ids
+                + [self.eos_token_id]
+            )
+            # Chain IDs: CLS and heavy = 0, separator CLS and light and EOS = 1
+            chain_ids = (
+                [0] * (1 + len(heavy_ids) + 1)  # CLS + heavy + separator CLS
+                + [1] * (len(light_ids) + 1)  # light + EOS
+            )
+        else:
+            # <cls> heavy light <eos>
+            input_ids = (
+                [self.cls_token_id]
+                + heavy_ids
+                + light_ids
+                + [self.eos_token_id]
+            )
+            # Chain IDs: CLS and heavy = 0, light and EOS = 1
+            chain_ids = (
+                [0] * (1 + len(heavy_ids))  # CLS + heavy
+                + [1] * (len(light_ids) + 1)  # light + EOS
+            )
+
+        attention_mask = [1] * len(input_ids)
+
+        result = {
+            "input_ids": input_ids,
+            "chain_ids": chain_ids,
+            "attention_mask": attention_mask,
+        }
+
+        if return_tensors == "pt":
+            import torch
+
+            result = {k: torch.tensor([v]) for k, v in result.items()}
+
+        return result
 
 
 # Module-level instance for convenience
