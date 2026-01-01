@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from dab.model import DAbConfig, DAbModel
-from dab.vocab import Vocab
+from dab.tokenizer import tokenizer
 
 
 @pytest.fixture
@@ -31,11 +31,11 @@ class TestModelForwardIntegration:
         light = "DIQMTQSPSSVSASVGDRVTITCRASQGISSWLAWYQQKPGKAPKLLIY"
 
         # Encode sequences
-        heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-        light_ids = Vocab.encode(light, add_special_tokens=False)
+        heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+        light_ids = tokenizer.encode(light, add_special_tokens=False)
 
         # Build full sequence: [CLS] heavy light [EOS]
-        token_ids = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+        token_ids = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
         chain_ids = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
 
         # Convert to tensors
@@ -62,9 +62,9 @@ class TestModelForwardIntegration:
         batch_chains = []
 
         for heavy, light in sequences:
-            heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-            light_ids = Vocab.encode(light, add_special_tokens=False)
-            tokens = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+            heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+            light_ids = tokenizer.encode(light, add_special_tokens=False)
+            tokens = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
             chains = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
             batch_tokens.append(tokens)
             batch_chains.append(chains)
@@ -75,7 +75,7 @@ class TestModelForwardIntegration:
         for i in range(len(batch_tokens)):
             seq_len = len(batch_tokens[i])
             attention_mask.append([1] * seq_len + [0] * (max_len - seq_len))
-            batch_tokens[i] += [Vocab.PAD_IDX] * (max_len - seq_len)
+            batch_tokens[i] += [tokenizer.pad_token_id] * (max_len - seq_len)
             batch_chains[i] += [0] * (max_len - seq_len)
 
         token_ids = torch.tensor(batch_tokens)
@@ -91,15 +91,15 @@ class TestModelForwardIntegration:
         heavy = "EVQLVESGGGLVQ"
         light = "DIQMTQSPSS"
 
-        heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-        light_ids = Vocab.encode(light, add_special_tokens=False)
+        heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+        light_ids = tokenizer.encode(light, add_special_tokens=False)
 
         # Replace some tokens with MASK
-        heavy_ids[3] = Vocab.MASK_IDX
-        heavy_ids[7] = Vocab.MASK_IDX
-        light_ids[2] = Vocab.MASK_IDX
+        heavy_ids[3] = tokenizer.mask_token_id
+        heavy_ids[7] = tokenizer.mask_token_id
+        light_ids[2] = tokenizer.mask_token_id
 
-        tokens = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+        tokens = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
         chains = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
 
         token_ids = torch.tensor([tokens])
@@ -117,8 +117,8 @@ class TestModelForwardIntegration:
         model.eval()
 
         token_ids = torch.randint(4, 28, (2, 32))
-        token_ids[:, 0] = Vocab.CLS_IDX
-        token_ids[:, -1] = Vocab.EOS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
+        token_ids[:, -1] = tokenizer.eos_token_id
         chain_ids = torch.zeros_like(token_ids)
         chain_ids[:, 16:] = 1
         attention_mask = torch.ones_like(token_ids)
@@ -134,8 +134,8 @@ class TestModelForwardIntegration:
         model.train()
 
         token_ids = torch.randint(4, 28, (2, 32))
-        token_ids[:, 0] = Vocab.CLS_IDX
-        token_ids[:, -1] = Vocab.EOS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
+        token_ids[:, -1] = tokenizer.eos_token_id
         chain_ids = torch.zeros_like(token_ids)
         chain_ids[:, 16:] = 1
         attention_mask = torch.ones_like(token_ids)

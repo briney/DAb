@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ..vocab import Vocab
+from ..tokenizer import tokenizer
 
 
 class AntibodyCollator:
@@ -33,10 +33,10 @@ class AntibodyCollator:
         heavy_nt: list[int] | None,
         light_nt: list[int] | None,
     ) -> dict[str, list[int]]:
-        heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-        light_ids = Vocab.encode(light, add_special_tokens=False)
+        heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+        light_ids = tokenizer.encode(light, add_special_tokens=False)
 
-        token_ids = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+        token_ids = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
         chain_ids = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
         special_mask = [1] + [0] * len(heavy_ids) + [0] * len(light_ids) + [1]
 
@@ -161,7 +161,7 @@ class AntibodyCollator:
         for i, enc in enumerate(encoded):
             seq_len = min(len(enc["token_ids"]), pad_len)
 
-            token_ids.append(self._pad_sequence(enc["token_ids"], pad_len, Vocab.PAD_IDX))
+            token_ids.append(self._pad_sequence(enc["token_ids"], pad_len, tokenizer.pad_token_id))
             chain_ids.append(self._pad_sequence(enc["chain_ids"], pad_len, 0))
             attention_mask.append([1] * seq_len + [0] * (pad_len - seq_len))
             special_masks.append(self._pad_sequence(enc["special_mask"], pad_len, 1))

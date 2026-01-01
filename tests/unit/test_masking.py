@@ -5,7 +5,7 @@ import torch
 
 from dab.diffusion.masking import InformationWeightedMasker, UniformMasker
 from dab.diffusion.noise_schedule import LinearSchedule
-from dab.vocab import Vocab
+from dab.tokenizer import tokenizer
 
 
 class TestUniformMasker:
@@ -34,7 +34,7 @@ class TestUniformMasker:
         masked_ids, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
 
         # Where mask_labels is True, masked_ids should be MASK_IDX
-        assert (masked_ids[mask_labels] == Vocab.MASK_IDX).all()
+        assert (masked_ids[mask_labels] == tokenizer.mask_token_id).all()
 
     def test_respects_attention_mask(self, masker):
         batch_size, seq_len = 2, 32
@@ -51,8 +51,8 @@ class TestUniformMasker:
     def test_respects_special_tokens_mask(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        token_ids[:, 0] = Vocab.CLS_IDX
-        token_ids[:, -1] = Vocab.EOS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
+        token_ids[:, -1] = tokenizer.eos_token_id
         timesteps = torch.tensor([100, 100])
         attention_mask = torch.ones(batch_size, seq_len)
         special_tokens_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)

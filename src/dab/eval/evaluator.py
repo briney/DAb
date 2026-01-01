@@ -201,8 +201,8 @@ class Evaluator:
                     # Default: random 15% masking for eval
                     mask_labels = self._create_eval_mask(batch, device)
                     masked_ids = batch["token_ids"].clone()
-                    from ..vocab import Vocab
-                    masked_ids[mask_labels.bool()] = Vocab.MASK_IDX
+                    from ..tokenizer import tokenizer
+                    masked_ids[mask_labels.bool()] = tokenizer.mask_token_id
 
                 # Forward pass
                 outputs = self.model(

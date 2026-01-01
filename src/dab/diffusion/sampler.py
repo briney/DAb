@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from tqdm import tqdm
 
-from ..vocab import Vocab
+from ..tokenizer import tokenizer
 from .noise_schedule import NoiseSchedule
 
 
@@ -86,9 +86,9 @@ class DiffusionSampler:
 
         # Start with all masked tokens (except CLS at position 0)
         token_ids = torch.full(
-            (batch_size, seq_len), Vocab.MASK_IDX, dtype=torch.long, device=device
+            (batch_size, seq_len), tokenizer.mask_token_id, dtype=torch.long, device=device
         )
-        token_ids[:, 0] = Vocab.CLS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
 
         if attention_mask is None:
             attention_mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
@@ -100,7 +100,7 @@ class DiffusionSampler:
             current_rate = self.noise_schedule.get_mask_rate(t)
             next_rate = self.noise_schedule.get_mask_rate(t - 1) if t > 1 else 0.0
 
-            is_masked = token_ids == Vocab.MASK_IDX
+            is_masked = token_ids == tokenizer.mask_token_id
             outputs = model(token_ids, chain_ids, attention_mask)
             sampled = self._sample_from_logits(outputs["logits"])
 
@@ -157,7 +157,7 @@ class DiffusionSampler:
 
         # Apply masks to positions we want to regenerate
         token_ids = token_ids.clone()
-        token_ids[mask_positions] = Vocab.MASK_IDX
+        token_ids[mask_positions] = tokenizer.mask_token_id
 
         if attention_mask is None:
             attention_mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
@@ -169,7 +169,7 @@ class DiffusionSampler:
             current_rate = self.noise_schedule.get_mask_rate(t)
             next_rate = self.noise_schedule.get_mask_rate(t - 1) if t > 1 else 0.0
 
-            is_masked = token_ids == Vocab.MASK_IDX
+            is_masked = token_ids == tokenizer.mask_token_id
             outputs = model(token_ids, chain_ids, attention_mask)
             sampled = self._sample_from_logits(outputs["logits"])
 

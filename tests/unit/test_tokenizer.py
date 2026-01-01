@@ -1,0 +1,58 @@
+"""Tests for tokenizer."""
+
+import pytest
+
+from dab.tokenizer import AA_END_IDX, AA_START_IDX, DEFAULT_VOCAB, Tokenizer, tokenizer
+
+
+class TestTokenizer:
+    def test_vocab_size(self):
+        assert len(tokenizer) == 32
+        assert tokenizer.vocab_size == 32
+
+    def test_special_token_ids(self):
+        assert tokenizer.cls_token_id == 0
+        assert tokenizer.pad_token_id == 1
+        assert tokenizer.eos_token_id == 2
+        assert tokenizer.unk_token_id == 3
+        assert tokenizer.mask_token_id == 31
+
+    def test_convert_tokens_to_ids(self):
+        assert tokenizer.convert_tokens_to_ids("<cls>") == 0
+        assert tokenizer.convert_tokens_to_ids("L") == 4
+        assert tokenizer.convert_tokens_to_ids("<mask>") == 31
+
+    def test_unknown_token(self):
+        assert tokenizer.convert_tokens_to_ids("?") == tokenizer.unk_token_id
+
+    def test_encode_simple(self):
+        sequence = "LAG"
+        encoded = tokenizer.encode(sequence, add_special_tokens=False)
+        assert encoded == [4, 5, 6]
+
+    def test_encode_with_special_tokens(self):
+        sequence = "LA"
+        encoded = tokenizer.encode(sequence, add_special_tokens=True)
+        assert encoded[0] == tokenizer.cls_token_id
+        assert encoded[-1] == tokenizer.eos_token_id
+        assert len(encoded) == 4
+
+    def test_roundtrip(self):
+        sequence = "EVQLVESGGGLVQ"
+        encoded = tokenizer.encode(sequence, add_special_tokens=False)
+        # HF tokenizers add spaces between tokens, so remove them
+        decoded = tokenizer.decode(encoded, skip_special_tokens=True).replace(" ", "")
+        assert decoded == sequence
+
+    def test_aa_index_constants(self):
+        assert AA_START_IDX == 4
+        assert AA_END_IDX == 30
+
+    def test_default_vocab_length(self):
+        assert len(DEFAULT_VOCAB) == 32
+
+    def test_tokenizer_instance(self):
+        # Test that creating a new tokenizer works
+        tok = Tokenizer()
+        assert len(tok) == 32
+        assert tok.cls_token_id == 0

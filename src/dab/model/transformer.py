@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ..vocab import Vocab
 from .embeddings import DAbEmbedding
 from .layers import TransformerEncoder
 
@@ -19,7 +18,7 @@ class DAbConfig:
     """Configuration for DAb model."""
 
     vocab_size: int = 32
-    padding_idx: int = Vocab.PAD_IDX
+    padding_idx: int = 1  # tokenizer.pad_token_id
 
     d_model: int = 256
     n_layers: int = 16

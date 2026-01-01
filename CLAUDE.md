@@ -21,7 +21,7 @@ pytest tests/integration/    # Integration tests (5)
 pytest tests/e2e/            # End-to-end tests (3)
 
 # Run single test file
-pytest tests/unit/test_vocab.py -v
+pytest tests/unit/test_tokenizer.py -v
 
 # Run with coverage
 pytest tests/ --cov=dab
@@ -69,11 +69,12 @@ Configs in `configs/` use Hydra's compose pattern:
 - `src/dab/cli.py` - Click CLI with train/encode commands
 - `src/dab/model/transformer.py` - DAbModel and DAbConfig
 
-### Vocabulary
+### Tokenizer
 
-32-token vocabulary in `src/dab/vocab.py`:
-- Special tokens: `<cls>` (0), `<pad>` (1), `<eos>` (2), `<unk>` (3), `<mask>` (31)
+HuggingFace-style tokenizer in `src/dab/tokenizer.py` extending `PreTrainedTokenizerFast`:
+- 32-token vocabulary with special tokens: `<cls>` (0), `<pad>` (1), `<eos>` (2), `<unk>` (3), `<mask>` (31)
 - 20 standard amino acids + 5 non-standard + gap/insertion markers
+- Module-level `tokenizer` instance for convenience
 
 ## Code Style
 

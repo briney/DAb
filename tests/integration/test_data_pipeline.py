@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from dab.data import AntibodyCollator, AntibodyDataset, create_dataloader
-from dab.vocab import Vocab
+from dab.tokenizer import tokenizer
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ class TestCollatorIntegration:
         assert batch["attention_mask"].shape == batch["token_ids"].shape
 
         # Check that CLS and EOS are in correct positions
-        assert (batch["token_ids"][:, 0] == Vocab.CLS_IDX).all()
+        assert (batch["token_ids"][:, 0] == tokenizer.cls_token_id).all()
 
     def test_collator_respects_max_length(self, sample_csv):
         """Test that collator respects maximum length."""

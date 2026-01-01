@@ -11,8 +11,8 @@ import torch
 from dab import DAbConfig, DAbEncoder, DAbModel
 from dab.data import create_dataloader
 from dab.diffusion import DiffusionSampler, UniformMasker, create_schedule
+from dab.tokenizer import tokenizer
 from dab.training import compute_masked_cross_entropy, create_optimizer
-from dab.vocab import Vocab
 
 
 @pytest.fixture
@@ -149,10 +149,10 @@ class TestTrainEncodeGenerate:
         heavy = "EVQLVESGGGLVQ"
         light = "DIQMTQSPSS"
 
-        heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-        light_ids = Vocab.encode(light, add_special_tokens=False)
+        heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+        light_ids = tokenizer.encode(light, add_special_tokens=False)
 
-        tokens = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+        tokens = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
         chains = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
 
         token_ids = torch.tensor([tokens])
@@ -178,7 +178,7 @@ class TestTrainEncodeGenerate:
         assert (sampled >= 0).all() and (sampled < 32).all()
 
         # Decode and verify it's valid
-        decoded = Vocab.decode(sampled[0].tolist())
+        decoded = tokenizer.decode(sampled[0].tolist())
         assert len(decoded) > 0
 
 
@@ -234,7 +234,7 @@ class TestDifferentPoolingStrategies:
         assert embedding.shape == (expected_len, 32)
 
 
-class TestVocabRoundtrip:
+class TestTokenizerRoundtrip:
     def test_encode_decode_roundtrip(self):
         """Test that sequences survive encode/decode roundtrip."""
         sequences = [
@@ -244,8 +244,9 @@ class TestVocabRoundtrip:
         ]
 
         for seq in sequences:
-            encoded = Vocab.encode(seq, add_special_tokens=False)
-            decoded = Vocab.decode(encoded)
+            encoded = tokenizer.encode(seq, add_special_tokens=False)
+            # HF tokenizers add spaces between tokens, so remove them
+            decoded = tokenizer.decode(encoded, skip_special_tokens=True).replace(" ", "")
             assert decoded == seq, f"Roundtrip failed for {seq}"
 
     def test_special_tokens_handling(self):
@@ -253,10 +254,10 @@ class TestVocabRoundtrip:
         seq = "EVQLVES"
 
         # With special tokens
-        with_special = Vocab.encode(seq, add_special_tokens=True)
-        assert with_special[0] == Vocab.CLS_IDX
-        assert with_special[-1] == Vocab.EOS_IDX
+        with_special = tokenizer.encode(seq, add_special_tokens=True)
+        assert with_special[0] == tokenizer.cls_token_id
+        assert with_special[-1] == tokenizer.eos_token_id
 
         # Decode should strip special tokens
-        decoded = Vocab.decode(with_special)
+        decoded = tokenizer.decode(with_special, skip_special_tokens=True).replace(" ", "")
         assert decoded == seq

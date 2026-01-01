@@ -5,7 +5,7 @@ import torch
 
 from dab.diffusion.noise_schedule import LinearSchedule
 from dab.diffusion.sampler import DiffusionSampler
-from dab.vocab import Vocab
+from dab.tokenizer import AA_END_IDX, AA_START_IDX, tokenizer
 
 
 class MockModel:
@@ -19,7 +19,7 @@ class MockModel:
         # Return random logits, but make amino acids more likely
         logits = torch.randn(batch_size, seq_len, self.vocab_size)
         # Boost amino acid logits
-        logits[:, :, Vocab.AA_START_IDX : Vocab.AA_END_IDX] += 2.0
+        logits[:, :, AA_START_IDX:AA_END_IDX] += 2.0
         return {"logits": logits}
 
 
@@ -60,7 +60,7 @@ class TestDiffusionSampler:
         )
 
         # First token should be CLS
-        assert (output[:, 0] == Vocab.CLS_IDX).all()
+        assert (output[:, 0] == tokenizer.cls_token_id).all()
 
     def test_sample_mostly_unmasked_at_end(self, sampler, mock_model):
         batch_size, seq_len = 2, 32
@@ -79,7 +79,7 @@ class TestDiffusionSampler:
         )
 
         # After sampling, most tokens should be unmasked (allow a few remaining due to rounding)
-        mask_count = (output == Vocab.MASK_IDX).sum()
+        mask_count = (output == tokenizer.mask_token_id).sum()
         assert mask_count < seq_len * batch_size * 0.1  # Less than 10% remaining masked
 
     def test_sample_with_attention_mask(self, sampler, mock_model):
@@ -145,7 +145,7 @@ class TestDiffusionSampler:
     def test_sample_conditional_shape(self, sampler, mock_model):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        token_ids[:, 0] = Vocab.CLS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
         chain_ids = torch.zeros(batch_size, seq_len).long()
         mask_positions = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         mask_positions[:, 10:20] = True  # Mask positions 10-19
@@ -163,7 +163,7 @@ class TestDiffusionSampler:
     def test_sample_conditional_preserves_unmasked(self, sampler, mock_model):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        token_ids[:, 0] = Vocab.CLS_IDX
+        token_ids[:, 0] = tokenizer.cls_token_id
         chain_ids = torch.zeros(batch_size, seq_len).long()
         mask_positions = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         mask_positions[:, 10:20] = True

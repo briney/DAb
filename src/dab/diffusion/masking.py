@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from ..vocab import Vocab
+from ..tokenizer import tokenizer
 from .noise_schedule import NoiseSchedule
 
 
@@ -21,7 +21,7 @@ class InformationWeightedMasker:
         self,
         noise_schedule: NoiseSchedule,
         weight_multiplier: float = 1.0,
-        mask_token_id: int = Vocab.MASK_IDX,
+        mask_token_id: int = tokenizer.mask_token_id,
     ) -> None:
         self.noise_schedule = noise_schedule
         self.weight_multiplier = weight_multiplier
@@ -104,7 +104,7 @@ class UniformMasker:
     def __init__(
         self,
         noise_schedule: NoiseSchedule,
-        mask_token_id: int = Vocab.MASK_IDX,
+        mask_token_id: int = tokenizer.mask_token_id,
     ) -> None:
         self.noise_schedule = noise_schedule
         self.mask_token_id = mask_token_id

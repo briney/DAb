@@ -11,8 +11,8 @@ from dab.diffusion import (
     create_schedule,
 )
 from dab.model import DAbConfig, DAbModel
+from dab.tokenizer import tokenizer
 from dab.training import compute_masked_cross_entropy
-from dab.vocab import Vocab
 
 
 @pytest.fixture
@@ -44,10 +44,10 @@ def sample_batch():
     heavy = "EVQLVESGGGLVQPGRSLRLSCAASGFTFSDYAMH"
     light = "DIQMTQSPSSVSASVGDRVTITCRASQGISSWLA"
 
-    heavy_ids = Vocab.encode(heavy, add_special_tokens=False)
-    light_ids = Vocab.encode(light, add_special_tokens=False)
+    heavy_ids = tokenizer.encode(heavy, add_special_tokens=False)
+    light_ids = tokenizer.encode(light, add_special_tokens=False)
 
-    tokens = [Vocab.CLS_IDX] + heavy_ids + light_ids + [Vocab.EOS_IDX]
+    tokens = [tokenizer.cls_token_id] + heavy_ids + light_ids + [tokenizer.eos_token_id]
     chains = [0] * (1 + len(heavy_ids)) + [1] * (len(light_ids) + 1)
 
     # Create CDR mask (positions 10-15 and 25-30 are CDRs)

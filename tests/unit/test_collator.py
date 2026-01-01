@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from dab.data.collator import AntibodyCollator
-from dab.vocab import Vocab
+from dab.tokenizer import tokenizer
 
 
 class TestAntibodyCollator:
@@ -56,10 +56,10 @@ class TestAntibodyCollator:
         result = collator(sample_batch)
 
         # First token should be CLS
-        assert (result["token_ids"][:, 0] == Vocab.CLS_IDX).all()
+        assert (result["token_ids"][:, 0] == tokenizer.cls_token_id).all()
 
         # Should have EOS somewhere in the sequence
-        has_eos = (result["token_ids"] == Vocab.EOS_IDX).any(dim=1)
+        has_eos = (result["token_ids"] == tokenizer.eos_token_id).any(dim=1)
         assert has_eos.all()
 
     def test_chain_ids(self, collator, sample_batch):
@@ -75,7 +75,7 @@ class TestAntibodyCollator:
         # Attention mask should be 1 for real tokens, 0 for padding
         for i in range(len(sample_batch)):
             # Find where padding starts
-            padding_start = (result["token_ids"][i] == Vocab.PAD_IDX).nonzero()
+            padding_start = (result["token_ids"][i] == tokenizer.pad_token_id).nonzero()
             if len(padding_start) > 0:
                 pad_idx = padding_start[0].item()
                 assert result["attention_mask"][i, :pad_idx].sum() == pad_idx
