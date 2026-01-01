@@ -226,7 +226,7 @@ checkpoints/
 *.ckpt
 
 # Data
-data/
+/data/
 *.csv
 *.parquet
 !tests/e2e/fixtures/*.csv
