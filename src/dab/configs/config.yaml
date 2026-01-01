@@ -1,0 +1,12 @@
+defaults:
+  - model: base
+  - train: default
+  - data: default
+  - diffusion: default
+  - log: default
+  - eval: default
+  - _self_
+
+name: dab_experiment
+seed: 42
+output_dir: outputs/${name}

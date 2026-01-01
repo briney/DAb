@@ -63,7 +63,7 @@ Repository = "https://github.com/brineylab/DAb"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dab = ["py.typed"]
+dab = ["py.typed", "configs/**/*.yaml"]
 
 [tool.ruff]
 line-length = 100

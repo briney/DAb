@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.resources
+from contextlib import ExitStack
 from pathlib import Path
 
 from hydra import compose, initialize_config_dir
@@ -16,7 +18,7 @@ from .utils import set_seed
 
 
 def run_training(
-    config: str = "configs",
+    config: str | None = None,
     output_dir: str = "outputs",
     name: str = "dab_experiment",
     resume_from: str | None = None,
@@ -31,7 +33,7 @@ def run_training(
     config
         Path to config file (.yaml/.yml) or config directory. If a file is
         provided, its parent directory is used as the config directory.
-        Defaults to "configs" directory.
+        If None or "configs", uses bundled default configs.
     output_dir
         Output directory for checkpoints and logs.
     name
@@ -45,26 +47,44 @@ def run_training(
     overrides
         List of Hydra config overrides (including data.train for training data).
     """
-    config_path = Path(config).absolute()
+    with ExitStack() as stack:
+        # Handle default/bundled configs
+        if config is None or config == "configs":
+            # Check if local configs directory exists first
+            local_configs = Path("configs").absolute()
+            if local_configs.exists() and local_configs.is_dir():
+                config_dir = local_configs
+            else:
+                # Use bundled configs from package
+                config_dir = stack.enter_context(
+                    importlib.resources.as_file(
+                        importlib.resources.files("dab").joinpath("configs")
+                    )
+                )
+            config_name = "config"
+        else:
+            config_path = Path(config).absolute()
 
-    # Validate config path exists
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Config path '{config}' does not exist.\n"
-            f"Provide a config file (.yaml) or config directory via --config/-c"
+            # Validate config path exists
+            if not config_path.exists():
+                raise FileNotFoundError(
+                    f"Config path '{config}' does not exist.\n"
+                    f"Provide a config file (.yaml) or config directory via --config/-c"
+                )
+
+            # Determine if config is a file or directory
+            if config_path.is_file():
+                # Config file provided - use parent as config dir
+                config_dir = config_path.parent
+                config_name = config_path.stem
+            else:
+                # Config directory provided
+                config_dir = config_path
+                config_name = "config"
+
+        stack.enter_context(
+            initialize_config_dir(config_dir=str(config_dir), version_base=None)
         )
-
-    # Determine if config is a file or directory
-    if config_path.is_file():
-        # Config file provided - use parent as config dir
-        config_dir = config_path.parent
-        config_name = config_path.stem
-    else:
-        # Config directory provided
-        config_dir = config_path
-        config_name = "config"
-
-    with initialize_config_dir(config_dir=str(config_dir), version_base=None):
         override_list = overrides or []
         override_list.extend(
             [f"name={name}", f"seed={seed}", f"output_dir={output_dir}"]
