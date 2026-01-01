@@ -79,8 +79,8 @@ def run_training(
         d_model=cfg.model.d_model,
         n_layers=cfg.model.n_layers,
         n_heads=cfg.model.n_heads,
-        head_dim=cfg.model.head_dim,
         d_ffn=cfg.model.d_ffn,
+        ffn_multiplier=cfg.model.ffn_multiplier,
         max_seq_len=cfg.model.max_seq_len,
         max_timesteps=cfg.model.max_timesteps,
         use_timestep_embedding=cfg.model.use_timestep_embedding,
@@ -94,13 +94,13 @@ def run_training(
     # Create train dataloader (handles single or multi-dataset automatically)
     train_loader = create_train_dataloader(
         cfg=cfg.data,
-        batch_size=cfg.training.batch_size,
+        batch_size=cfg.train.batch_size,
     )
 
     # Create eval dataloaders (handles multiple eval datasets)
     eval_dataloaders = create_eval_dataloaders(
         cfg=cfg.data,
-        default_batch_size=cfg.training.batch_size,
+        default_batch_size=cfg.train.batch_size,
     )
 
     # Create noise schedule and training config
@@ -109,28 +109,28 @@ def run_training(
     )
 
     training_config = TrainingConfig(
-        max_steps=cfg.training.max_steps,
-        max_epochs=cfg.training.max_epochs,
-        batch_size=cfg.training.batch_size,
-        gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
-        learning_rate=cfg.training.learning_rate,
-        weight_decay=cfg.training.weight_decay,
-        betas=tuple(cfg.training.betas),
-        max_grad_norm=cfg.training.max_grad_norm,
-        scheduler_type=cfg.training.scheduler_type,
-        warmup_steps=cfg.training.warmup_steps,
-        min_lr_ratio=cfg.training.min_lr_ratio,
+        max_steps=cfg.train.max_steps,
+        max_epochs=cfg.train.max_epochs,
+        batch_size=cfg.train.batch_size,
+        gradient_accumulation_steps=cfg.train.gradient_accumulation_steps,
+        learning_rate=cfg.train.optimizer.learning_rate,
+        weight_decay=cfg.train.optimizer.weight_decay,
+        betas=tuple(cfg.train.optimizer.betas),
+        max_grad_norm=cfg.train.max_grad_norm,
+        scheduler_decay=cfg.train.scheduler.decay,
+        warmup_steps=cfg.train.scheduler.warmup_steps,
+        min_lr_ratio=cfg.train.scheduler.min_lr_ratio,
         noise_schedule=cfg.diffusion.schedule_type,
         num_timesteps=cfg.diffusion.num_timesteps,
         weight_multiplier=cfg.diffusion.weight_multiplier,
-        log_every_n_steps=cfg.training.log_every_n_steps,
-        eval_every_n_steps=cfg.training.eval_every_n_steps,
-        save_every_n_steps=cfg.training.save_every_n_steps,
-        checkpoint_dir=cfg.training.checkpoint_dir,
-        keep_last_n_checkpoints=cfg.training.keep_last_n_checkpoints,
-        save_best=cfg.training.save_best,
+        log_steps=cfg.train.log_steps,
+        eval_steps=cfg.train.eval_steps,
+        checkpoint_steps=cfg.train.checkpoint_steps,
+        checkpoint_dir=cfg.train.checkpoint_dir,
+        keep_last_n_checkpoints=cfg.train.keep_last_n_checkpoints,
+        save_best=cfg.train.save_best,
         seed=cfg.seed,
-        mixed_precision=cfg.training.mixed_precision,
+        mixed_precision=cfg.train.mixed_precision,
     )
 
     # Create trainer with eval dataloaders
@@ -143,14 +143,14 @@ def run_training(
     )
 
     # Set up logging
-    if use_wandb and cfg.logging.enabled:
+    if use_wandb and cfg.log.wandb.enabled:
         logger = WandbLogger(
-            project=cfg.logging.project,
+            project=cfg.log.wandb.project,
             name=cfg.name,
             config=OmegaConf.to_container(cfg, resolve=True),
-            entity=cfg.logging.entity,
-            tags=list(cfg.logging.tags) if cfg.logging.tags else None,
-            notes=cfg.logging.notes,
+            entity=cfg.log.wandb.entity,
+            tags=list(cfg.log.wandb.tags) if cfg.log.wandb.tags else None,
+            notes=cfg.log.wandb.notes,
         )
         trainer.set_logger(logger)
 

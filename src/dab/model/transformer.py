@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import asdict, dataclass
 
 import torch
@@ -23,8 +24,11 @@ class DAbConfig:
     d_model: int = 256
     n_layers: int = 16
     n_heads: int = 4
-    head_dim: int = 64
     d_ffn: int | None = None
+    ffn_multiplier: float | None = None  # Default 8/3 when None
+
+    # Deprecated: head_dim is now computed as d_model // n_heads
+    head_dim: int | None = None
 
     max_seq_len: int = 320
     max_timesteps: int = 100
@@ -39,8 +43,28 @@ class DAbConfig:
     use_chain_aware_attention: bool = True
 
     def __post_init__(self) -> None:
+        # Validate and compute head_dim
+        if self.d_model % self.n_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by n_heads ({self.n_heads})"
+            )
+        computed_head_dim = self.d_model // self.n_heads
+        if self.head_dim is not None and self.head_dim != computed_head_dim:
+            warnings.warn(
+                f"head_dim is deprecated and computed automatically. "
+                f"Using {computed_head_dim} (d_model // n_heads).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.head_dim = computed_head_dim
+
+        # Set default ffn_multiplier if not provided
+        if self.ffn_multiplier is None:
+            self.ffn_multiplier = 8 / 3
+
+        # Compute d_ffn using ffn_multiplier if not provided
         if self.d_ffn is None:
-            self.d_ffn = int(self.d_model * 8 / 3)
+            self.d_ffn = int(self.d_model * self.ffn_multiplier)
             self.d_ffn = ((self.d_ffn + 63) // 64) * 64
 
 

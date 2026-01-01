@@ -16,7 +16,6 @@ def small_model():
         d_model=64,
         n_layers=2,
         n_heads=2,
-        head_dim=32,
         max_seq_len=64,
         max_timesteps=10,
         dropout=0.0,

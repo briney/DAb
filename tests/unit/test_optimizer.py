@@ -15,7 +15,6 @@ def tiny_model():
         d_model=32,
         n_layers=1,
         n_heads=1,
-        head_dim=32,
         max_seq_len=32,
         max_timesteps=10,
     )
@@ -72,7 +71,7 @@ class TestCreateScheduler:
         optimizer = create_optimizer(tiny_model)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="constant",
+            scheduler_decay="constant",
             num_training_steps=1000,
             num_warmup_steps=100,
         )
@@ -82,7 +81,7 @@ class TestCreateScheduler:
         optimizer = create_optimizer(tiny_model)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="linear",
+            scheduler_decay="linear",
             num_training_steps=1000,
             num_warmup_steps=100,
         )
@@ -92,23 +91,23 @@ class TestCreateScheduler:
         optimizer = create_optimizer(tiny_model)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="cosine",
+            scheduler_decay="cosine",
             num_training_steps=1000,
             num_warmup_steps=100,
         )
         assert scheduler is not None
 
-    def test_invalid_scheduler_type(self, tiny_model):
+    def test_invalid_scheduler_decay(self, tiny_model):
         optimizer = create_optimizer(tiny_model)
-        with pytest.raises(ValueError, match="Unknown scheduler type"):
-            create_scheduler(optimizer, scheduler_type="invalid")
+        with pytest.raises(ValueError, match="Unknown scheduler decay type"):
+            create_scheduler(optimizer, scheduler_decay="invalid")
 
     def test_warmup_behavior(self, tiny_model):
         base_lr = 1e-3
         optimizer = create_optimizer(tiny_model, lr=base_lr)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="cosine",
+            scheduler_decay="cosine",
             num_training_steps=1000,
             num_warmup_steps=100,
         )
@@ -130,7 +129,7 @@ class TestCreateScheduler:
         optimizer = create_optimizer(tiny_model, lr=base_lr)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="cosine",
+            scheduler_decay="cosine",
             num_training_steps=1000,
             num_warmup_steps=100,
             min_lr_ratio=min_lr_ratio,

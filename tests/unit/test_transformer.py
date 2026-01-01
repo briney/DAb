@@ -32,7 +32,6 @@ class TestDAbModel:
             d_model=64,
             n_layers=2,
             n_heads=2,
-            head_dim=32,
             max_seq_len=64,
             dropout=0.0,
             attention_dropout=0.0,
@@ -167,7 +166,6 @@ class TestDAbModel:
             d_model=64,
             n_layers=2,
             n_heads=2,
-            head_dim=32,
             max_seq_len=64,
             dropout=0.0,
             use_chain_aware_attention=False,  # Use standard attention
@@ -190,7 +188,6 @@ class TestDAbModel:
             d_model=64,
             n_layers=2,
             n_heads=2,
-            head_dim=32,
             max_seq_len=64,
             dropout=0.0,
         )

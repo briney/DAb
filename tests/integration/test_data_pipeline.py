@@ -190,7 +190,6 @@ class TestEndToEndDataPipeline:
             d_model=64,
             n_layers=2,
             n_heads=2,
-            head_dim=32,
             max_seq_len=128,
             dropout=0.0,
         )

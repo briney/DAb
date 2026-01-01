@@ -1,9 +1,9 @@
 defaults:
   - model: base
-  - training: default
+  - train: default
   - data: default
   - diffusion: default
-  - logging: wandb
+  - log: default
   - eval: default
   - _self_
 

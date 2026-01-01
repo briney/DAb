@@ -22,7 +22,7 @@ class SwiGLUFFN(nn.Module):
 
     Args:
         d_model: Model dimension
-        d_ffn: FFN intermediate dimension (default: 8/3 * d_model)
+        d_ffn: FFN intermediate dimension
         bias: Whether to include bias in linear layers
         dropout: Dropout probability
     """
@@ -30,15 +30,11 @@ class SwiGLUFFN(nn.Module):
     def __init__(
         self,
         d_model: int,
-        d_ffn: int | None = None,
+        d_ffn: int,
         bias: bool = False,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-
-        if d_ffn is None:
-            d_ffn = int(d_model * 8 / 3)
-            d_ffn = ((d_ffn + 63) // 64) * 64
 
         self.d_model = d_model
         self.d_ffn = d_ffn
@@ -64,15 +60,11 @@ class FusedSwiGLUFFN(nn.Module):
     def __init__(
         self,
         d_model: int,
-        d_ffn: int | None = None,
+        d_ffn: int,
         bias: bool = False,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-
-        if d_ffn is None:
-            d_ffn = int(d_model * 8 / 3)
-            d_ffn = ((d_ffn + 63) // 64) * 64
 
         self.d_model = d_model
         self.d_ffn = d_ffn

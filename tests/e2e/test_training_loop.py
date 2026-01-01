@@ -52,7 +52,6 @@ def small_model():
         d_model=32,
         n_layers=1,
         n_heads=1,
-        head_dim=32,
         max_seq_len=128,
         max_timesteps=50,
         dropout=0.0,
@@ -138,7 +137,7 @@ class TestMiniTrainingLoop:
 
         checkpoint_config = CheckpointConfig(
             save_dir=str(tmp_path / "checkpoints"),
-            save_every_n_steps=5,
+            checkpoint_steps=5,
             keep_last_n=2,
         )
         checkpoint_manager = CheckpointManager(
@@ -182,7 +181,7 @@ class TestMiniTrainingLoop:
         optimizer = create_optimizer(model, lr=1e-3)
         scheduler = create_scheduler(
             optimizer,
-            scheduler_type="cosine",
+            scheduler_decay="cosine",
             num_training_steps=100,
             num_warmup_steps=10,
         )

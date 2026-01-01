@@ -25,11 +25,10 @@ class TestSwiGLUFFN:
         out = ffn(x)
         assert out.shape == x.shape
 
-    def test_default_d_ffn(self):
-        ffn = SwiGLUFFN(d_model=64)
-        # d_ffn should be approximately 8/3 * d_model, rounded to nearest 64
-        assert ffn.d_ffn % 64 == 0
-        assert ffn.d_ffn > ffn.d_model
+    def test_d_ffn_required(self):
+        """d_ffn is now required (computed by DAbConfig)."""
+        with pytest.raises(TypeError):
+            SwiGLUFFN(d_model=64)
 
     def test_custom_d_ffn(self):
         ffn = SwiGLUFFN(d_model=64, d_ffn=256)

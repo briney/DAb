@@ -15,7 +15,6 @@ def tiny_model():
         d_model=32,
         n_layers=1,
         n_heads=1,
-        head_dim=32,
         max_seq_len=32,
         max_timesteps=10,
     )
@@ -27,7 +26,7 @@ def checkpoint_manager(tiny_model, tmp_path):
     """Create a checkpoint manager with temporary directory."""
     config = CheckpointConfig(
         save_dir=str(tmp_path / "checkpoints"),
-        save_every_n_steps=100,
+        checkpoint_steps=100,
         keep_last_n=3,
         save_best=True,
         best_metric="val_loss",
@@ -41,7 +40,7 @@ class TestCheckpointConfig:
     def test_default_values(self):
         config = CheckpointConfig()
         assert config.save_dir == "checkpoints"
-        assert config.save_every_n_steps == 1000
+        assert config.checkpoint_steps == 1000
         assert config.keep_last_n == 5
         assert config.save_best is True
         assert config.best_metric == "val_loss"
@@ -123,7 +122,7 @@ class TestCheckpointManager:
 
     def test_should_save(self, checkpoint_manager):
         # Default is every 100 steps
-        config = CheckpointConfig(save_every_n_steps=100)
+        config = CheckpointConfig(checkpoint_steps=100)
         checkpoint_manager.config = config
 
         assert checkpoint_manager.should_save(0) is False

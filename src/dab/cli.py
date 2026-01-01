@@ -60,7 +60,7 @@ def train(
 
         dab train --train data/train.csv
 
-        dab train -t data/train.csv model=small training.batch_size=64
+        dab train -t data/train.csv model=small train.batch_size=64
 
         # Multi-dataset via config override:
         dab train -t data/train.csv +data.train.extra.path=data/extra.parquet +data.train.extra.fraction=0.3

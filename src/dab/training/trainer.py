@@ -43,7 +43,7 @@ class TrainingConfig:
     max_grad_norm: float = 1.0
 
     # Scheduler
-    scheduler_type: str = "cosine"
+    scheduler_decay: str = "cosine"
     warmup_steps: int = 1000
     min_lr_ratio: float = 0.1
 
@@ -53,9 +53,9 @@ class TrainingConfig:
     weight_multiplier: float = 1.0
 
     # Intervals (in steps)
-    log_every_n_steps: int = 10
-    eval_every_n_steps: int = 500
-    save_every_n_steps: int = 1000
+    log_steps: int = 10
+    eval_steps: int = 500
+    checkpoint_steps: int = 1000
 
     # Checkpointing
     checkpoint_dir: str = "checkpoints"
@@ -98,7 +98,7 @@ class Trainer:
 
         self.scheduler = create_scheduler(
             self.optimizer,
-            scheduler_type=config.scheduler_type,
+            scheduler_decay=config.scheduler_decay,
             num_training_steps=config.max_steps,
             num_warmup_steps=config.warmup_steps,
             min_lr_ratio=config.min_lr_ratio,
@@ -138,7 +138,7 @@ class Trainer:
 
         checkpoint_config = CheckpointConfig(
             save_dir=config.checkpoint_dir,
-            save_every_n_steps=config.save_every_n_steps,
+            checkpoint_steps=config.checkpoint_steps,
             keep_last_n=config.keep_last_n_checkpoints,
             save_best=config.save_best,
         )
@@ -356,7 +356,7 @@ class Trainer:
                     self.metrics.update("train_loss", loss.item())
 
                     # Logging
-                    if self.global_step % self.config.log_every_n_steps == 0:
+                    if self.global_step % self.config.log_steps == 0:
                         log_metrics = self.metrics.compute_all()
                         log_metrics["learning_rate"] = get_lr(self.optimizer)
                         log_metrics["epoch"] = self.epoch
@@ -369,8 +369,8 @@ class Trainer:
 
                     # Evaluation
                     if (
-                        self.config.eval_every_n_steps > 0
-                        and self.global_step % self.config.eval_every_n_steps == 0
+                        self.config.eval_steps > 0
+                        and self.global_step % self.config.eval_steps == 0
                     ):
                         all_eval_metrics = self.evaluate_all()
                         if self.logger is not None and all_eval_metrics:

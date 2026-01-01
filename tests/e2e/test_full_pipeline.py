@@ -48,7 +48,6 @@ def trained_model(sample_data, tmp_path):
         d_model=32,
         n_layers=1,
         n_heads=1,
-        head_dim=32,
         max_seq_len=128,
         max_timesteps=50,
         dropout=0.0,

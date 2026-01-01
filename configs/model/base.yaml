@@ -4,8 +4,8 @@ padding_idx: 1
 d_model: 256
 n_layers: 16
 n_heads: 4
-head_dim: 64
 d_ffn: null
+ffn_multiplier: null
 
 max_seq_len: 320
 max_timesteps: 100

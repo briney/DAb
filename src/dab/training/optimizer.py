@@ -43,13 +43,13 @@ def create_optimizer(
 
 def create_scheduler(
     optimizer: Optimizer,
-    scheduler_type: str = "cosine",
+    scheduler_decay: str = "cosine",
     num_training_steps: int = 100000,
     num_warmup_steps: int = 1000,
     min_lr_ratio: float = 0.1,
 ) -> _LRScheduler:
     """Create learning rate scheduler with warmup."""
-    if scheduler_type == "constant":
+    if scheduler_decay == "constant":
 
         def lr_lambda(step: int) -> float:
             if step < num_warmup_steps:
@@ -58,7 +58,7 @@ def create_scheduler(
 
         return LambdaLR(optimizer, lr_lambda)
 
-    elif scheduler_type == "linear":
+    elif scheduler_decay == "linear":
         warmup = LinearLR(
             optimizer, start_factor=1e-8, end_factor=1.0, total_iters=num_warmup_steps
         )
@@ -72,7 +72,7 @@ def create_scheduler(
             optimizer, schedulers=[warmup, decay], milestones=[num_warmup_steps]
         )
 
-    elif scheduler_type == "cosine":
+    elif scheduler_decay == "cosine":
         warmup = LinearLR(
             optimizer, start_factor=1e-8, end_factor=1.0, total_iters=num_warmup_steps
         )
@@ -86,7 +86,7 @@ def create_scheduler(
         )
 
     else:
-        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+        raise ValueError(f"Unknown scheduler decay type: {scheduler_decay}")
 
 
 def get_lr(optimizer: Optimizer) -> float:

@@ -16,7 +16,7 @@ class CheckpointConfig:
     """Configuration for checkpointing."""
 
     save_dir: str = "checkpoints"
-    save_every_n_steps: int = 1000
+    checkpoint_steps: int = 1000
     keep_last_n: int = 5
     save_best: bool = True
     best_metric: str = "val_loss"
@@ -129,4 +129,4 @@ class CheckpointManager:
 
     def should_save(self, step: int) -> bool:
         """Check if we should save at this step."""
-        return step > 0 and step % self.config.save_every_n_steps == 0
+        return step > 0 and step % self.config.checkpoint_steps == 0
