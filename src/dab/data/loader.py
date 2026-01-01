@@ -9,7 +9,12 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from .collator import AntibodyCollator
 from .config import is_single_train_dataset, parse_eval_config, parse_train_config
-from .dataset import AntibodyDataset, MultiDataset
+from .dataset import (
+    AntibodyDataset,
+    MultiDataset,
+    StructureDataset,
+    detect_dataset_format,
+)
 
 
 def create_dataloader(
@@ -224,11 +229,58 @@ def create_train_dataloader(
         )
 
 
+def create_structure_dataloader(
+    folder_path: str | Path,
+    batch_size: int,
+    max_length: int = 320,
+    num_workers: int = 4,
+    pin_memory: bool = True,
+    chain_id: str | None = None,
+    strict: bool = False,
+    recursive: bool = False,
+) -> DataLoader:
+    """Create a DataLoader for structure data (PDB/mmCIF files).
+
+    Args:
+        folder_path: Path to folder containing PDB/mmCIF files.
+        batch_size: Batch size.
+        max_length: Maximum sequence length (for padding/truncation).
+        num_workers: Number of worker processes.
+        pin_memory: Whether to pin memory for faster GPU transfer.
+        chain_id: Specific chain to extract from each file.
+        strict: If True, raise on missing backbone atoms.
+        recursive: If True, search subdirectories recursively.
+
+    Returns:
+        DataLoader instance for structure data.
+    """
+    dataset = StructureDataset(
+        folder_path=folder_path,
+        max_length=max_length,
+        chain_id=chain_id,
+        strict=strict,
+        recursive=recursive,
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,  # No shuffle for eval
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=False,  # Don't drop last for eval
+    )
+
+
 def create_eval_dataloaders(
     cfg: DictConfig,
     default_batch_size: int,
 ) -> dict[str, DataLoader]:
     """Create evaluation dataloaders from config.
+
+    Automatically detects dataset format (sequence vs structure) based on the
+    path if not explicitly specified. Sequence datasets use AntibodyDataset,
+    while structure datasets use StructureDataset.
 
     Args:
         cfg: Data configuration with `eval` key.
@@ -248,30 +300,50 @@ def create_eval_dataloaders(
     for name, dataset_cfg in eval_configs.items():
         # Per-dataset overrides with global defaults
         batch_size = dataset_cfg.batch_size or default_batch_size
-        load_coords = (
-            dataset_cfg.load_coords
-            if dataset_cfg.load_coords is not None
-            else cfg.get("load_coords", False)
-        )
 
-        dataloaders[name] = create_dataloader(
-            data_path=dataset_cfg.path,
-            batch_size=batch_size,
-            max_length=cfg.max_length,
-            shuffle=False,  # No shuffle for eval
-            num_workers=cfg.num_workers,
-            pin_memory=cfg.pin_memory,
-            drop_last=False,  # Don't drop last for eval
-            pad_to_max=cfg.pad_to_max,
-            load_coords=load_coords,
-            heavy_col=cfg.heavy_col,
-            light_col=cfg.light_col,
-            heavy_cdr_col=cfg.heavy_cdr_col,
-            light_cdr_col=cfg.light_cdr_col,
-            heavy_nt_col=cfg.heavy_nt_col,
-            light_nt_col=cfg.light_nt_col,
-            heavy_coords_col=cfg.heavy_coords_col,
-            light_coords_col=cfg.light_coords_col,
-        )
+        # Determine format: explicit or auto-detect
+        dataset_format = dataset_cfg.format
+        if dataset_format is None:
+            dataset_format = detect_dataset_format(dataset_cfg.path)
+
+        if dataset_format == "structure":
+            # Structure dataset
+            dataloaders[name] = create_structure_dataloader(
+                folder_path=dataset_cfg.path,
+                batch_size=batch_size,
+                max_length=cfg.max_length,
+                num_workers=cfg.num_workers,
+                pin_memory=cfg.pin_memory,
+                chain_id=dataset_cfg.chain_id,
+                strict=dataset_cfg.strict,
+                recursive=dataset_cfg.recursive,
+            )
+        else:
+            # Sequence dataset (default)
+            load_coords = (
+                dataset_cfg.load_coords
+                if dataset_cfg.load_coords is not None
+                else cfg.get("load_coords", False)
+            )
+
+            dataloaders[name] = create_dataloader(
+                data_path=dataset_cfg.path,
+                batch_size=batch_size,
+                max_length=cfg.max_length,
+                shuffle=False,  # No shuffle for eval
+                num_workers=cfg.num_workers,
+                pin_memory=cfg.pin_memory,
+                drop_last=False,  # Don't drop last for eval
+                pad_to_max=cfg.pad_to_max,
+                load_coords=load_coords,
+                heavy_col=cfg.heavy_col,
+                light_col=cfg.light_col,
+                heavy_cdr_col=cfg.heavy_cdr_col,
+                light_cdr_col=cfg.light_cdr_col,
+                heavy_nt_col=cfg.heavy_nt_col,
+                light_nt_col=cfg.light_nt_col,
+                heavy_coords_col=cfg.heavy_coords_col,
+                light_coords_col=cfg.light_coords_col,
+            )
 
     return dataloaders

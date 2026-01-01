@@ -10,13 +10,31 @@ from omegaconf import DictConfig
 
 @dataclass
 class DatasetConfig:
-    """Configuration for a single dataset."""
+    """Configuration for a single dataset.
+
+    Attributes:
+        path: Path to the dataset file or directory.
+        fraction: Sampling fraction for multi-dataset training.
+        batch_size: Override batch size for this dataset.
+        load_coords: Whether to load 3D coordinates.
+        metrics: Metrics configuration for this dataset.
+        format: Dataset format, either "sequence" or "structure".
+            If None, auto-detected from path.
+        chain_id: For structure datasets, specific chain to extract.
+        strict: For structure datasets, whether to raise on missing atoms.
+        recursive: For structure datasets, whether to search subdirectories.
+    """
 
     path: str
     fraction: float | None = None
     batch_size: int | None = None
     load_coords: bool | None = None
     metrics: dict[str, Any] | None = None
+    # Structure-specific options
+    format: str | None = None  # "sequence" or "structure", auto-detected if None
+    chain_id: str | None = None
+    strict: bool = False
+    recursive: bool = False
 
 
 def is_single_train_dataset(train_cfg: str | DictConfig | None) -> bool:
@@ -178,6 +196,11 @@ def parse_eval_config(
     - Named datasets: {"validation": "/path/to/val.parquet"}
     - Full config: {"validation": {"path": "/path", "batch_size": 32, ...}}
 
+    Dataset format (sequence vs structure) is auto-detected from the path if not
+    explicitly specified. CSV, TSV, and Parquet files are treated as sequence
+    datasets. Directories containing PDB/mmCIF files are treated as structure
+    datasets.
+
     Args:
         eval_cfg: Either a string path (single dataset) or a dict of
                   dataset configs (multi-dataset).
@@ -197,15 +220,20 @@ def parse_eval_config(
         >>> parse_eval_config({"validation": "/val.parquet"}, cfg)
         {"validation": DatasetConfig(path="/val.parquet")}
 
-        # Full config
+        # Full config with format
         >>> parse_eval_config({
         ...     "test": {
         ...         "path": "/test.parquet",
         ...         "batch_size": 64,
         ...         "load_coords": True
+        ...     },
+        ...     "structures": {
+        ...         "path": "/pdb_folder",
+        ...         "format": "structure",
+        ...         "chain_id": "A"
         ...     }
         ... }, cfg)
-        {"test": DatasetConfig(path="/test.parquet", batch_size=64, load_coords=True)}
+        {"test": DatasetConfig(...), "structures": DatasetConfig(...)}
     """
     if not eval_cfg:
         return {}
@@ -227,6 +255,10 @@ def parse_eval_config(
                 batch_size=cfg.get("batch_size"),
                 load_coords=cfg.get("load_coords"),
                 metrics=dict(cfg.get("metrics", {})) if cfg.get("metrics") else None,
+                format=cfg.get("format"),
+                chain_id=cfg.get("chain_id"),
+                strict=cfg.get("strict", False),
+                recursive=cfg.get("recursive", False),
             )
 
     return result

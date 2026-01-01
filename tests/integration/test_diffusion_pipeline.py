@@ -111,6 +111,10 @@ class TestDiffusionTrainingStep:
         self, model, noise_schedule, sample_batch
     ):
         """Test full training step with information-weighted masking."""
+        # Set seed for reproducibility - ensures timesteps aren't too low
+        # (very low timesteps → near-zero mask rate → no masked tokens → zero loss)
+        torch.manual_seed(42)
+
         masker = InformationWeightedMasker(noise_schedule, weight_multiplier=2.0)
 
         batch_size = sample_batch["token_ids"].shape[0]
