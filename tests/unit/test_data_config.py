@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 
 from dab.data.config import (
     DatasetConfig,
+    is_single_eval_dataset,
     is_single_train_dataset,
     normalize_fractions,
     parse_eval_config,
@@ -152,6 +153,23 @@ class TestParseTrainConfig:
         assert abs(fractions["dataset_b"] - 0.3) < 1e-6
 
 
+class TestIsSingleEvalDataset:
+    """Tests for is_single_eval_dataset function."""
+
+    def test_string_is_single(self):
+        """String path is a single dataset."""
+        assert is_single_eval_dataset("/path/to/data.parquet") is True
+
+    def test_dict_is_multi(self):
+        """Dict config is multi-dataset."""
+        cfg = OmegaConf.create({"validation": "/val.parquet"})
+        assert is_single_eval_dataset(cfg) is False
+
+    def test_none_is_not_single(self):
+        """None is not a single dataset."""
+        assert is_single_eval_dataset(None) is False
+
+
 class TestParseEvalConfig:
     """Tests for parse_eval_config function."""
 
@@ -165,8 +183,18 @@ class TestParseEvalConfig:
         result = parse_eval_config(None, OmegaConf.create({}))
         assert result == {}
 
-    def test_path_shorthand(self):
-        """Simple path shorthand."""
+    def test_single_path(self):
+        """Single path string returns single dataset with key 'eval'."""
+        result = parse_eval_config("/path/to/eval.parquet", OmegaConf.create({}))
+
+        assert len(result) == 1
+        assert "eval" in result
+        assert result["eval"].path == "/path/to/eval.parquet"
+        assert result["eval"].batch_size is None
+        assert result["eval"].load_coords is None
+
+    def test_named_dataset_shorthand(self):
+        """Named dataset with path shorthand."""
         cfg = OmegaConf.create({"validation": "/path/to/val.parquet"})
         global_cfg = OmegaConf.create({})
 
