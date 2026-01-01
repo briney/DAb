@@ -3,13 +3,13 @@
 import pytest
 import torch
 
-from dab.model.attention import EfficientChainAwareAttention
+from dab.model.attention import ChainAwareAttention
 
 
-class TestEfficientChainAwareAttention:
+class TestChainAwareAttention:
     @pytest.fixture
     def attention(self):
-        return EfficientChainAwareAttention(
+        return ChainAwareAttention(
             d_model=64, n_heads=4, head_dim=16, dropout=0.0, max_seq_len=128
         )
 
@@ -70,3 +70,32 @@ class TestEfficientChainAwareAttention:
         out2 = attention(x, chain_ids)
 
         assert torch.allclose(out1, out2)
+
+    def test_need_weights_returns_attention(self, attention):
+        """Test that need_weights=True returns attention weights."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.cat(
+            [torch.zeros(batch, seq_len // 2), torch.ones(batch, seq_len // 2)], dim=1
+        ).long()
+
+        out, attn_weights = attention(x, chain_ids, need_weights=True)
+
+        assert out.shape == x.shape
+        n_heads = 4
+        assert attn_weights.shape == (batch, n_heads, seq_len, seq_len)
+
+    def test_attention_weights_sum_to_one(self, attention):
+        """Test that attention weights sum to 1 for each query position."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.cat(
+            [torch.zeros(batch, seq_len // 2), torch.ones(batch, seq_len // 2)], dim=1
+        ).long()
+
+        attention.eval()
+        _, attn_weights = attention(x, chain_ids, need_weights=True)
+
+        # Attention weights should sum to 1 for each query position
+        row_sums = attn_weights.sum(dim=-1)
+        assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)

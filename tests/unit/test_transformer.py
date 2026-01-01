@@ -65,15 +65,50 @@ class TestDAbModel:
 
         assert outputs["logits"].shape == (batch_size, seq_len, 32)
 
-    def test_forward_return_hidden_states(self, model):
+    def test_forward_output_hidden_states(self, model, config):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(0, 32, (batch_size, seq_len))
         chain_ids = torch.zeros(batch_size, seq_len).long()
 
-        outputs = model(token_ids, chain_ids, return_hidden_states=True)
+        outputs = model(token_ids, chain_ids, output_hidden_states=True)
 
         assert "all_hidden_states" in outputs
-        assert len(outputs["all_hidden_states"]) == 2  # n_layers
+        # Should be n_layers + 1 (embedding + each layer output)
+        assert len(outputs["all_hidden_states"]) == config.n_layers + 1
+
+        # Check shapes
+        for hidden_state in outputs["all_hidden_states"]:
+            assert hidden_state.shape == (batch_size, seq_len, config.d_model)
+
+    def test_forward_output_attentions(self, model, config):
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(0, 32, (batch_size, seq_len))
+        chain_ids = torch.zeros(batch_size, seq_len).long()
+
+        outputs = model(token_ids, chain_ids, output_attentions=True)
+
+        assert "attentions" in outputs
+        # Should be n_layers attention weight tensors
+        assert len(outputs["attentions"]) == config.n_layers
+
+        # Each attention output is a single merged attention weight tensor
+        for attn_weights in outputs["attentions"]:
+            assert attn_weights.shape == (batch_size, config.n_heads, seq_len, seq_len)
+
+    def test_forward_output_both(self, model, config):
+        """Test returning both hidden states and attentions."""
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(0, 32, (batch_size, seq_len))
+        chain_ids = torch.zeros(batch_size, seq_len).long()
+
+        outputs = model(
+            token_ids, chain_ids, output_hidden_states=True, output_attentions=True
+        )
+
+        assert "all_hidden_states" in outputs
+        assert "attentions" in outputs
+        assert len(outputs["all_hidden_states"]) == config.n_layers + 1
+        assert len(outputs["attentions"]) == config.n_layers
 
     def test_forward_with_multiple_chains(self, model):
         batch_size, seq_len = 2, 32

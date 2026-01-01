@@ -1,5 +1,12 @@
 """
 Hybrid Self-Attention and Cross-Attention with chain masking.
+
+Implements the MINT-style attention mechanism where:
+1. Self-attention scores (with RoPE) are computed for intra-chain pairs
+2. Cross-attention scores (without RoPE) are computed for inter-chain pairs
+3. Scores are merged before softmax based on chain membership
+4. A single softmax normalizes across all positions
+5. Weights are split after softmax for separate value multiplications
 """
 
 from __future__ import annotations
@@ -15,14 +22,16 @@ from torch import Tensor
 from .rope import RotaryPositionEmbedding
 
 
-class EfficientChainAwareAttention(nn.Module):
+class ChainAwareAttention(nn.Module):
     """
-    Attention module supporting hybrid intra-chain (self) and inter-chain (cross) attention.
+    Attention module implementing MINT-style hybrid intra/inter-chain attention.
 
     For antibody sequences with multiple chains:
-    1. Computes self-attention scores for all position pairs
-    2. Computes cross-attention scores for all position pairs
-    3. Creates composite: intra-chain pairs use self-attention, inter-chain use cross-attention
+    1. Computes self-attention scores (with RoPE) for intra-chain pairs
+    2. Computes cross-attention scores (without RoPE) for inter-chain pairs
+    3. Merges scores before softmax: intra-chain uses self scores, inter-chain uses cross scores
+    4. Applies single softmax to merged scores
+    5. Splits attention weights after softmax for value multiplication
 
     Args:
         d_model: Model dimension
@@ -48,15 +57,16 @@ class EfficientChainAwareAttention(nn.Module):
         self.n_heads = n_heads
         self.head_dim = head_dim
         self.scale = head_dim**-0.5
+        self.dropout_p = dropout
 
         inner_dim = n_heads * head_dim
 
-        # Self-attention projections
+        # Self-attention projections (RoPE will be applied to Q and K)
         self.q_self = nn.Linear(d_model, inner_dim, bias=bias)
         self.k_self = nn.Linear(d_model, inner_dim, bias=bias)
         self.v_self = nn.Linear(d_model, inner_dim, bias=bias)
 
-        # Cross-attention projections
+        # Cross-attention projections (no RoPE)
         self.q_cross = nn.Linear(d_model, inner_dim, bias=bias)
         self.k_cross = nn.Linear(d_model, inner_dim, bias=bias)
         self.v_cross = nn.Linear(d_model, inner_dim, bias=bias)
@@ -64,27 +74,63 @@ class EfficientChainAwareAttention(nn.Module):
         # Output projection
         self.out_proj = nn.Linear(inner_dim, d_model, bias=bias)
 
-        # RoPE
+        # RoPE (only applied to self-attention)
         self.rope = RotaryPositionEmbedding(head_dim, max_seq_len=max_seq_len)
 
         self.dropout = nn.Dropout(dropout)
+
+    def _create_chain_mask(
+        self, chain_ids: Tensor, attention_mask: Optional[Tensor]
+    ) -> tuple[Tensor, Tensor]:
+        """
+        Create intra-chain mask and padding mask.
+
+        Args:
+            chain_ids: Chain identity tensor of shape (batch, seq_len)
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+
+        Returns:
+            intra_mask: Boolean mask where True = same chain (batch, 1, seq_len, seq_len)
+            padding_mask: Additive mask with -inf for padding (batch, 1, 1, seq_len)
+        """
+        # Chain masks: (batch, seq_len, seq_len)
+        chain_i = chain_ids.unsqueeze(-1)  # (batch, seq_len, 1)
+        chain_j = chain_ids.unsqueeze(-2)  # (batch, 1, seq_len)
+        intra_mask = (chain_i == chain_j).unsqueeze(1)  # (batch, 1, seq_len, seq_len)
+
+        # Padding mask
+        if attention_mask is not None:
+            # Create additive mask: 0 where valid, -inf where padding
+            padding_mask = torch.zeros_like(attention_mask, dtype=torch.float)
+            padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
+            padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
+        else:
+            padding_mask = None
+
+        return intra_mask, padding_mask
 
     def forward(
         self,
         x: Tensor,
         chain_ids: Tensor,
         attention_mask: Optional[Tensor] = None,
-    ) -> Tensor:
+        need_weights: bool = False,
+    ) -> Tensor | tuple[Tensor, Tensor]:
         """
-        Forward pass with efficient chain-aware attention.
+        Forward pass with MINT-style chain-aware attention.
 
         Args:
             x: Input tensor of shape (batch, seq_len, d_model)
             chain_ids: Chain identity tensor of shape (batch, seq_len)
             attention_mask: Optional padding mask of shape (batch, seq_len)
+            need_weights: If True, return attention weights
 
         Returns:
-            Output tensor of shape (batch, seq_len, d_model)
+            If need_weights is False:
+                Output tensor of shape (batch, seq_len, d_model)
+            If need_weights is True:
+                Tuple of (output, attn_weights) where attn_weights has shape
+                (batch, n_heads, seq_len, seq_len)
         """
         batch_size, seq_len, _ = x.shape
 
@@ -97,50 +143,46 @@ class EfficientChainAwareAttention(nn.Module):
         k_cross = rearrange(self.k_cross(x), "b s (h d) -> b h s d", h=self.n_heads)
         v_cross = rearrange(self.v_cross(x), "b s (h d) -> b h s d", h=self.n_heads)
 
-        # Apply RoPE
+        # Apply RoPE only to self-attention Q and K (not cross-attention)
         q_self, k_self = self.rope(q_self, k_self)
-        q_cross, k_cross = self.rope(q_cross, k_cross)
 
         # Compute raw attention scores
         scores_self = torch.matmul(q_self, k_self.transpose(-2, -1)) * self.scale
         scores_cross = torch.matmul(q_cross, k_cross.transpose(-2, -1)) * self.scale
 
         # Create chain masks
-        chain_i = chain_ids.unsqueeze(-1)  # (batch, seq_len, 1)
-        chain_j = chain_ids.unsqueeze(-2)  # (batch, 1, seq_len)
-        intra_mask = (chain_i == chain_j).unsqueeze(1)  # (batch, 1, seq_len, seq_len)
-        inter_mask = ~intra_mask
+        intra_mask, padding_mask = self._create_chain_mask(chain_ids, attention_mask)
 
-        # Mask out irrelevant positions in each attention type
-        scores_self = scores_self.masked_fill(inter_mask, float("-inf"))
-        scores_cross = scores_cross.masked_fill(intra_mask, float("-inf"))
+        # Convert intra_mask to float for torch.where and later multiplication
+        intra_mask_float = intra_mask.float()
+
+        # Merge attention scores before softmax:
+        # Use self scores for intra-chain pairs, cross scores for inter-chain pairs
+        merged_scores = torch.where(intra_mask, scores_self, scores_cross)
 
         # Apply padding mask
-        if attention_mask is not None:
-            padding_mask = ~attention_mask.bool().unsqueeze(1).unsqueeze(2)
-            scores_self = scores_self.masked_fill(padding_mask, float("-inf"))
-            scores_cross = scores_cross.masked_fill(padding_mask, float("-inf"))
+        if padding_mask is not None:
+            merged_scores = merged_scores + padding_mask
 
-        # Compute attention weights
-        attn_self = F.softmax(scores_self, dim=-1)
-        attn_cross = F.softmax(scores_cross, dim=-1)
+        # Single softmax over all positions
+        attn_weights = F.softmax(merged_scores, dim=-1)
 
-        # Handle NaN from all-masked rows
-        attn_self = torch.nan_to_num(attn_self, nan=0.0)
-        attn_cross = torch.nan_to_num(attn_cross, nan=0.0)
+        # Handle NaN from all-masked rows (e.g., all padding)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
 
-        attn_self = self.dropout(attn_self)
-        attn_cross = self.dropout(attn_cross)
+        # Apply dropout
+        attn_weights = self.dropout(attn_weights)
 
-        # Compute outputs
-        out_self = torch.matmul(attn_self, v_self)
-        out_cross = torch.matmul(attn_cross, v_cross)
-
-        # Combine outputs
+        # Compute weighted values using chain mask to route to appropriate values
+        # Intra-chain positions use v_self, inter-chain positions use v_cross
+        out_self = torch.matmul(attn_weights * intra_mask_float, v_self)
+        out_cross = torch.matmul(attn_weights * (1.0 - intra_mask_float), v_cross)
         output = out_self + out_cross
 
         # Reshape and project
         output = rearrange(output, "b h s d -> b s (h d)")
         output = self.out_proj(output)
 
+        if need_weights:
+            return output, attn_weights
         return output

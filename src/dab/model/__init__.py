@@ -1,6 +1,6 @@
 """DAb model components."""
 
-from .attention import EfficientChainAwareAttention
+from .attention import ChainAwareAttention
 from .embeddings import (
     DAbEmbedding,
     LearnedTimestepEmbedding,
@@ -17,7 +17,7 @@ __all__ = [
     "DAbConfig",
     "PreNormBlock",
     "TransformerEncoder",
-    "EfficientChainAwareAttention",
+    "ChainAwareAttention",
     "SwiGLU",
     "SwiGLUFFN",
     "FusedSwiGLUFFN",

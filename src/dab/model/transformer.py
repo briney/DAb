@@ -96,23 +96,61 @@ class DAbModel(nn.Module):
         chain_ids: Tensor,
         attention_mask: Optional[Tensor] = None,
         timesteps: Optional[Tensor] = None,
-        return_hidden_states: bool = False,
-    ) -> dict[str, Tensor]:
-        hidden_states = self.embeddings(token_ids, timesteps)
+        output_hidden_states: bool = False,
+        output_attentions: bool = False,
+    ) -> dict[str, Tensor | tuple[Tensor, ...]]:
+        """
+        Forward pass through the model.
 
-        if return_hidden_states:
-            hidden_states, all_hidden_states = self.encoder(
-                hidden_states, chain_ids, attention_mask, return_all_hidden_states=True
-            )
-        else:
-            hidden_states = self.encoder(hidden_states, chain_ids, attention_mask)
+        Args:
+            token_ids: Input token IDs of shape (batch, seq_len)
+            chain_ids: Chain identity tensor of shape (batch, seq_len)
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+            timesteps: Optional diffusion timesteps of shape (batch,)
+            output_hidden_states: If True, return all hidden states (n_layers + 1 tensors)
+            output_attentions: If True, return attention weights from all layers
+
+        Returns:
+            Dictionary with:
+                - "logits": Output logits of shape (batch, seq_len, vocab_size)
+                - "hidden_states": Final hidden states of shape (batch, seq_len, d_model)
+                - "all_hidden_states": (optional) Tuple of n_layers + 1 hidden state tensors
+                - "attentions": (optional) Tuple of n_layers attention weight tensors
+        """
+        embedded = self.embeddings(token_ids, timesteps)
+
+        # Call encoder with appropriate flags
+        encoder_outputs = self.encoder(
+            embedded,
+            chain_ids,
+            attention_mask,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+        )
+
+        # Parse encoder outputs based on what was requested
+        if output_hidden_states and output_attentions:
+            hidden_states, all_hidden_states, all_attentions = encoder_outputs
+        elif output_hidden_states:
+            hidden_states, all_hidden_states = encoder_outputs
+            all_attentions = None
+        elif output_attentions:
+            hidden_states, all_attentions = encoder_outputs
             all_hidden_states = None
+        else:
+            hidden_states = encoder_outputs
+            all_hidden_states = None
+            all_attentions = None
 
         logits = self.lm_head(hidden_states)
 
         output = {"logits": logits, "hidden_states": hidden_states}
+
         if all_hidden_states is not None:
             output["all_hidden_states"] = all_hidden_states
+
+        if all_attentions is not None:
+            output["attentions"] = all_attentions
 
         return output
 

@@ -7,7 +7,7 @@ from typing import Optional
 import torch.nn as nn
 from torch import Tensor
 
-from .attention import EfficientChainAwareAttention
+from .attention import ChainAwareAttention
 from .ffn import FusedSwiGLUFFN
 
 
@@ -34,7 +34,7 @@ class PreNormBlock(nn.Module):
         super().__init__()
 
         self.attention_norm = nn.LayerNorm(d_model, eps=layer_norm_eps)
-        self.attention = EfficientChainAwareAttention(
+        self.attention = ChainAwareAttention(
             d_model=d_model,
             n_heads=n_heads,
             head_dim=head_dim,
@@ -51,15 +51,41 @@ class PreNormBlock(nn.Module):
         x: Tensor,
         chain_ids: Tensor,
         attention_mask: Optional[Tensor] = None,
-    ) -> Tensor:
+        output_attentions: bool = False,
+    ) -> Tensor | tuple[Tensor, Tensor]:
+        """
+        Forward pass through the transformer block.
+
+        Args:
+            x: Input tensor of shape (batch, seq_len, d_model)
+            chain_ids: Chain identity tensor of shape (batch, seq_len)
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+            output_attentions: If True, return attention weights
+
+        Returns:
+            If output_attentions is False:
+                Output tensor of shape (batch, seq_len, d_model)
+            If output_attentions is True:
+                Tuple of (output, attn_weights) where attn_weights has shape
+                (batch, n_heads, seq_len, seq_len)
+        """
         normed = self.attention_norm(x)
-        attn_out = self.attention(normed, chain_ids, attention_mask)
+
+        if output_attentions:
+            attn_out, attn_weights = self.attention(
+                normed, chain_ids, attention_mask, need_weights=True
+            )
+        else:
+            attn_out = self.attention(normed, chain_ids, attention_mask, need_weights=False)
+
         x = x + self.dropout(attn_out)
 
         normed = self.ffn_norm(x)
         ffn_out = self.ffn(normed)
         x = x + self.dropout(ffn_out)
 
+        if output_attentions:
+            return x, attn_weights
         return x
 
 
@@ -101,17 +127,59 @@ class TransformerEncoder(nn.Module):
         x: Tensor,
         chain_ids: Tensor,
         attention_mask: Optional[Tensor] = None,
-        return_all_hidden_states: bool = False,
-    ) -> Tensor | tuple[Tensor, list[Tensor]]:
-        hidden_states = []
+        output_hidden_states: bool = False,
+        output_attentions: bool = False,
+    ) -> Tensor | tuple[Tensor, tuple[Tensor, ...]] | tuple[
+        Tensor, tuple[Tensor, ...], tuple[Tensor, ...]
+    ]:
+        """
+        Forward pass through the transformer encoder.
+
+        Args:
+            x: Input tensor of shape (batch, seq_len, d_model)
+            chain_ids: Chain identity tensor of shape (batch, seq_len)
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+            output_hidden_states: If True, return all hidden states (including input)
+            output_attentions: If True, return attention weights from all layers
+
+        Returns:
+            If neither output_hidden_states nor output_attentions:
+                Output tensor of shape (batch, seq_len, d_model)
+            If output_hidden_states only:
+                Tuple of (output, hidden_states) where hidden_states is a tuple of
+                n_layers + 1 tensors (input embedding + each layer output before final norm)
+            If output_attentions only:
+                Tuple of (output, attentions) where attentions is a tuple of
+                n_layers attention weight tensors
+            If both:
+                Tuple of (output, hidden_states, attentions)
+        """
+        all_hidden_states: tuple[Tensor, ...] = ()
+        all_attentions: tuple[Tensor, ...] = ()
+
+        # Include input embeddings in hidden states
+        if output_hidden_states:
+            all_hidden_states = (x,)
 
         for layer in self.layers:
-            x = layer(x, chain_ids, attention_mask)
-            if return_all_hidden_states:
-                hidden_states.append(x)
+            if output_attentions:
+                x, attn_weights = layer(
+                    x, chain_ids, attention_mask, output_attentions=True
+                )
+                all_attentions = all_attentions + (attn_weights,)
+            else:
+                x = layer(x, chain_ids, attention_mask, output_attentions=False)
+
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (x,)
 
         x = self.final_norm(x)
 
-        if return_all_hidden_states:
-            return x, hidden_states
+        # Build return value based on what was requested
+        if output_hidden_states and output_attentions:
+            return x, all_hidden_states, all_attentions
+        elif output_hidden_states:
+            return x, all_hidden_states
+        elif output_attentions:
+            return x, all_attentions
         return x
