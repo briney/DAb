@@ -2,7 +2,7 @@ defaults:
   - model: base
   - training: default
   - data: default
-  - diffusion: cosine
+  - diffusion: default
   - logging: wandb
   - eval: default
   - _self_

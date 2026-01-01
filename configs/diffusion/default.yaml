@@ -1,3 +1,4 @@
+# schedule_type options: cosine, linear, sqrt
 schedule_type: cosine
 num_timesteps: 100
 weight_multiplier: 1.0

@@ -1,3 +1,0 @@
-schedule_type: sqrt
-num_timesteps: 100
-weight_multiplier: 1.0
