@@ -7,7 +7,7 @@ from pathlib import Path
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 
-from .data import create_dataloader
+from .data import create_eval_dataloaders, create_train_dataloader
 from .diffusion import create_schedule
 from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
@@ -18,8 +18,7 @@ from .utils import set_seed
 def run_training(
     config_path: str | None = None,
     config_dir: str = "configs",
-    train_data: str | None = None,
-    eval_data: str | None = None,
+    train: str | None = None,
     output_dir: str = "outputs",
     name: str = "dab_experiment",
     resume_from: str | None = None,
@@ -35,10 +34,9 @@ def run_training(
         Optional path to a specific config file.
     config_dir
         Directory containing Hydra configs.
-    train_data
-        Path to training data.
-    eval_data
-        Optional path to evaluation data.
+    train
+        Path to training data (single dataset). For multi-dataset,
+        configure via data.train in config or overrides.
     output_dir
         Output directory for checkpoints and logs.
     name
@@ -60,10 +58,9 @@ def run_training(
             [f"name={name}", f"seed={seed}", f"output_dir={output_dir}"]
         )
 
-        if train_data:
-            override_list.append(f"data.train_data={train_data}")
-        if eval_data:
-            override_list.append(f"data.eval_data={eval_data}")
+        # Handle CLI override for train path
+        if train:
+            override_list.append(f"data.train={train}")
 
         cfg = compose(config_name="config", overrides=override_list)
 
@@ -94,30 +91,17 @@ def run_training(
     model = DAbModel(model_config)
     print(f"Model parameters: {model.get_num_params():,}")
 
-    # Create data loaders
-    train_loader = create_dataloader(
-        data_path=cfg.data.train_data,
+    # Create train dataloader (handles single or multi-dataset automatically)
+    train_loader = create_train_dataloader(
+        cfg=cfg.data,
         batch_size=cfg.training.batch_size,
-        max_length=cfg.data.max_length,
-        shuffle=True,
-        num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory,
-        drop_last=cfg.data.drop_last,
-        pad_to_max=cfg.data.pad_to_max,
     )
 
-    eval_loader = None
-    if cfg.data.eval_data:
-        eval_loader = create_dataloader(
-            data_path=cfg.data.eval_data,
-            batch_size=cfg.training.batch_size,
-            max_length=cfg.data.max_length,
-            shuffle=False,
-            num_workers=cfg.data.num_workers,
-            pin_memory=cfg.data.pin_memory,
-            drop_last=False,
-            pad_to_max=cfg.data.pad_to_max,
-        )
+    # Create eval dataloaders (handles multiple eval datasets)
+    eval_dataloaders = create_eval_dataloaders(
+        cfg=cfg.data,
+        default_batch_size=cfg.training.batch_size,
+    )
 
     # Create noise schedule and training config
     noise_schedule = create_schedule(
@@ -149,12 +133,12 @@ def run_training(
         mixed_precision=cfg.training.mixed_precision,
     )
 
-    # Create trainer
+    # Create trainer with eval dataloaders
     trainer = Trainer(
         config=training_config,
         model=model,
         train_dataloader=train_loader,
-        eval_dataloader=eval_loader,
+        eval_dataloaders=eval_dataloaders if eval_dataloaders else None,
         noise_schedule=noise_schedule,
     )
 
@@ -184,8 +168,9 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Train a DAb model")
-    parser.add_argument("--train-data", "-t", required=True, help="Training data path")
-    parser.add_argument("--eval-data", "-e", default=None, help="Evaluation data path")
+    parser.add_argument(
+        "--train", "-t", required=True, help="Training data path (single dataset)"
+    )
     parser.add_argument("--config-dir", default="configs", help="Config directory")
     parser.add_argument("--output-dir", "-o", default="outputs", help="Output directory")
     parser.add_argument("--name", "-n", default="dab_experiment", help="Experiment name")
@@ -197,8 +182,7 @@ def main() -> None:
 
     run_training(
         config_dir=args.config_dir,
-        train_data=args.train_data,
-        eval_data=args.eval_data,
+        train=args.train,
         output_dir=args.output_dir,
         name=args.name,
         resume_from=args.resume,

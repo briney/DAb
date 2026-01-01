@@ -27,14 +27,11 @@ def main() -> None:
     help="Config directory",
 )
 @click.option(
-    "--train-data",
+    "--train",
     "-t",
     type=click.Path(exists=True),
     required=True,
-    help="Training data path",
-)
-@click.option(
-    "--eval-data", "-e", type=click.Path(exists=True), help="Evaluation data path"
+    help="Training data path (single dataset)",
 )
 @click.option(
     "--output-dir", "-o", type=click.Path(), default="outputs", help="Output directory"
@@ -49,8 +46,7 @@ def main() -> None:
 def train(
     config: str | None,
     config_dir: str,
-    train_data: str,
-    eval_data: str | None,
+    train: str,
     output_dir: str,
     name: str,
     resume: str | None,
@@ -62,17 +58,19 @@ def train(
 
     Examples:
 
-        dab train --train-data data/train.csv --eval-data data/val.csv
+        dab train --train data/train.csv
 
         dab train -t data/train.csv model=small training.batch_size=64
+
+        # Multi-dataset via config override:
+        dab train -t data/train.csv +data.train.extra.path=data/extra.parquet +data.train.extra.fraction=0.3
     """
     from .train import run_training
 
     run_training(
         config_path=config,
         config_dir=config_dir,
-        train_data=train_data,
-        eval_data=eval_data,
+        train=train,
         output_dir=output_dir,
         name=name,
         resume_from=resume,
