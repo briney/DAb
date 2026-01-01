@@ -4,6 +4,7 @@ defaults:
   - data: default
   - diffusion: cosine
   - logging: wandb
+  - eval: default
   - _self_
 
 name: dab_experiment

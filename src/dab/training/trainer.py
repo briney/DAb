@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 from accelerate import Accelerator
@@ -18,6 +19,9 @@ from .metrics import (
     compute_masked_cross_entropy,
 )
 from .optimizer import create_optimizer, create_scheduler, get_lr
+
+if TYPE_CHECKING:
+    from ..eval import Evaluator
 
 
 @dataclass
@@ -74,7 +78,9 @@ class Trainer:
         model: DAbModel,
         train_dataloader: DataLoader,
         eval_dataloader: DataLoader | None = None,
+        eval_dataloaders: dict[str, DataLoader] | None = None,
         noise_schedule: NoiseSchedule | None = None,
+        evaluator: "Evaluator | None" = None,
     ) -> None:
         self.config = config
 
@@ -105,9 +111,22 @@ class Trainer:
             self.scheduler,
         ) = self.accelerator.prepare(model, self.optimizer, train_dataloader, self.scheduler)
 
+        # Support both single eval_dataloader (legacy) and multiple eval_dataloaders
         self.eval_dataloader = (
             self.accelerator.prepare(eval_dataloader) if eval_dataloader else None
         )
+
+        # Prepare multiple eval dataloaders if provided
+        self.eval_dataloaders: dict[str, DataLoader] = {}
+        if eval_dataloaders:
+            for name, loader in eval_dataloaders.items():
+                self.eval_dataloaders[name] = self.accelerator.prepare(loader)
+        elif self.eval_dataloader is not None:
+            # Use single eval_dataloader as "validation" if no multi-loader dict provided
+            self.eval_dataloaders["validation"] = self.eval_dataloader
+
+        # Store evaluator for advanced metrics
+        self.evaluator = evaluator
 
         if noise_schedule is None:
             from ..diffusion import create_schedule
@@ -138,6 +157,14 @@ class Trainer:
     def set_logger(self, logger) -> None:
         """Set the logger for training metrics."""
         self.logger = logger
+
+    def set_evaluator(self, evaluator: "Evaluator") -> None:
+        """Set the evaluator for advanced metrics.
+
+        Args:
+            evaluator: Evaluator instance for computing metrics.
+        """
+        self.evaluator = evaluator
 
     def _apply_masking(
         self, batch: dict[str, torch.Tensor]
@@ -190,7 +217,7 @@ class Trainer:
 
     @torch.no_grad()
     def evaluate(self) -> dict[str, float]:
-        """Run evaluation on the eval dataset."""
+        """Run evaluation on the eval dataset (legacy single-dataset method)."""
         if self.eval_dataloader is None:
             return {}
 
@@ -228,6 +255,65 @@ class Trainer:
             "val_accuracy": eval_metrics.compute("accuracy"),
             "val_perplexity": eval_metrics.compute("perplexity"),
         }
+
+    def evaluate_all(self) -> dict[str, dict[str, float]]:
+        """Run evaluation on all configured eval datasets.
+
+        Uses the Evaluator if available for advanced metrics, otherwise
+        falls back to basic metrics.
+
+        Returns:
+            Dictionary mapping eval dataset names to their metric results.
+        """
+        if not self.eval_dataloaders:
+            return {}
+
+        if self.evaluator is not None:
+            # Use advanced evaluator
+            return self.evaluator.evaluate_all(
+                self.eval_dataloaders,
+                masker=self.uniform_masker,
+            )
+
+        # Fall back to simple evaluation for each dataset
+        all_results: dict[str, dict[str, float]] = {}
+        self.model.eval()
+
+        for eval_name, eval_loader in self.eval_dataloaders.items():
+            eval_metrics = MetricAccumulator()
+
+            for batch in tqdm(
+                eval_loader,
+                desc=f"Eval ({eval_name})",
+                disable=not self.accelerator.is_local_main_process,
+            ):
+                mask_output = self._apply_masking(batch)
+
+                outputs = self.model(
+                    token_ids=mask_output["masked_ids"],
+                    chain_ids=batch["chain_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+                metrics = compute_diffusion_metrics(
+                    logits=outputs["logits"],
+                    targets=batch["token_ids"],
+                    mask_labels=mask_output["mask_labels"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+                eval_metrics.update("loss", metrics.loss)
+                eval_metrics.update("accuracy", metrics.accuracy)
+                eval_metrics.update("perplexity", metrics.perplexity)
+
+            all_results[eval_name] = {
+                "loss": eval_metrics.compute("loss"),
+                "accuracy": eval_metrics.compute("accuracy"),
+                "perplexity": eval_metrics.compute("perplexity"),
+            }
+
+        self.model.train()
+        return all_results
 
     def train(self) -> None:
         """Run the training loop."""
@@ -286,13 +372,33 @@ class Trainer:
                         self.config.eval_every_n_steps > 0
                         and self.global_step % self.config.eval_every_n_steps == 0
                     ):
-                        eval_metrics = self.evaluate()
-                        if self.logger is not None and eval_metrics:
-                            self.logger.log(eval_metrics, step=self.global_step)
+                        all_eval_metrics = self.evaluate_all()
+                        if self.logger is not None and all_eval_metrics:
+                            # Use log_eval_all if available, otherwise flatten and log
+                            if hasattr(self.logger, "log_eval_all"):
+                                self.logger.log_eval_all(
+                                    all_eval_metrics, step=self.global_step
+                                )
+                            else:
+                                # Flatten metrics for basic logging
+                                flat_metrics = {}
+                                for eval_name, metrics in all_eval_metrics.items():
+                                    for metric_name, value in metrics.items():
+                                        flat_metrics[f"{eval_name}/{metric_name}"] = value
+                                self.logger.log(flat_metrics, step=self.global_step)
 
                     # Checkpointing
                     if self.checkpoint_manager.should_save(self.global_step):
-                        eval_metrics = self.evaluate() if self.eval_dataloader else {}
+                        # Get metrics for checkpoint (use first eval dataset or run eval)
+                        if self.eval_dataloaders:
+                            all_eval_metrics = self.evaluate_all()
+                            # Flatten for checkpoint manager
+                            eval_metrics = {}
+                            for eval_name, metrics in all_eval_metrics.items():
+                                for metric_name, value in metrics.items():
+                                    eval_metrics[f"{eval_name}/{metric_name}"] = value
+                        else:
+                            eval_metrics = {}
                         self.checkpoint_manager.save(
                             step=self.global_step, epoch=self.epoch, metrics=eval_metrics
                         )
@@ -304,7 +410,15 @@ class Trainer:
 
         # Final checkpoint
         if self.accelerator.is_main_process:
-            final_metrics = self.evaluate() if self.eval_dataloader else {}
+            if self.eval_dataloaders:
+                all_eval_metrics = self.evaluate_all()
+                # Flatten for checkpoint manager
+                final_metrics = {}
+                for eval_name, metrics in all_eval_metrics.items():
+                    for metric_name, value in metrics.items():
+                        final_metrics[f"{eval_name}/{metric_name}"] = value
+            else:
+                final_metrics = {}
             self.checkpoint_manager.save(
                 step=self.global_step, epoch=self.epoch, metrics=final_metrics
             )

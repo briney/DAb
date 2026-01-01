@@ -50,6 +50,53 @@ class WandbLogger:
             return
         wandb.log(metrics, step=step, commit=commit)
 
+    def log_eval(
+        self,
+        metrics: dict[str, float],
+        eval_name: str,
+        step: int | None = None,
+        commit: bool = True,
+    ) -> None:
+        """Log evaluation metrics with dataset-specific prefixes.
+
+        Args:
+            metrics: Dictionary of metric names to values.
+            eval_name: Name of the evaluation dataset (used as prefix).
+            step: Optional step number.
+            commit: Whether to commit the log immediately.
+        """
+        if not self.enabled:
+            return
+
+        # Prefix metric names with eval dataset name
+        prefixed_metrics = {f"{eval_name}/{k}": v for k, v in metrics.items()}
+        wandb.log(prefixed_metrics, step=step, commit=commit)
+
+    def log_eval_all(
+        self,
+        all_metrics: dict[str, dict[str, float]],
+        step: int | None = None,
+        commit: bool = True,
+    ) -> None:
+        """Log evaluation metrics from all datasets.
+
+        Args:
+            all_metrics: Dictionary mapping eval dataset names to their metrics.
+            step: Optional step number.
+            commit: Whether to commit the log immediately.
+        """
+        if not self.enabled:
+            return
+
+        # Combine all metrics with prefixes
+        combined = {}
+        for eval_name, metrics in all_metrics.items():
+            for metric_name, value in metrics.items():
+                combined[f"{eval_name}/{metric_name}"] = value
+
+        if combined:
+            wandb.log(combined, step=step, commit=commit)
+
     def log_artifact(
         self,
         artifact_path: str,
