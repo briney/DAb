@@ -14,6 +14,7 @@ class ScheduleType(str, Enum):
     LINEAR = "linear"
     COSINE = "cosine"
     SQRT = "sqrt"
+    STATIC = "static"
 
 
 class NoiseSchedule(ABC):
@@ -57,6 +58,34 @@ class SqrtSchedule(NoiseSchedule):
         return math.sqrt(t_normalized)
 
 
+class StaticSchedule(NoiseSchedule):
+    """Static masking rate for MLM-style training.
+
+    Returns constant mask rate regardless of timestep, enabling
+    traditional masked language model training where mask_rate is fixed
+    (typically 15% as in BERT).
+
+    Parameters
+    ----------
+    num_timesteps
+        Number of timesteps (kept for API compatibility).
+    mask_rate
+        The constant masking rate to return (default: 0.15 for 15%).
+    """
+
+    def __init__(self, num_timesteps: int, mask_rate: float = 0.15) -> None:
+        super().__init__(num_timesteps)
+        if not 0.0 < mask_rate < 1.0:
+            raise ValueError(f"mask_rate must be in (0, 1), got {mask_rate}")
+        self.mask_rate = mask_rate
+
+    def get_mask_rate(self, timestep: int | Tensor) -> float | Tensor:
+        """Return constant mask rate, ignoring timestep."""
+        if isinstance(timestep, Tensor):
+            return torch.full_like(timestep, self.mask_rate, dtype=torch.float)
+        return self.mask_rate
+
+
 def create_schedule(
     schedule_type: str | ScheduleType, num_timesteps: int, **kwargs
 ) -> NoiseSchedule:
@@ -69,5 +98,8 @@ def create_schedule(
         return CosineSchedule(num_timesteps)
     elif schedule_type == ScheduleType.SQRT:
         return SqrtSchedule(num_timesteps)
+    elif schedule_type == ScheduleType.STATIC:
+        mask_rate = kwargs.get("mask_rate", 0.15)
+        return StaticSchedule(num_timesteps, mask_rate=mask_rate)
     else:
         raise ValueError(f"Unknown schedule type: {schedule_type}")

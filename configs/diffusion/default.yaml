@@ -1,4 +1,6 @@
-# schedule_type options: cosine, linear, sqrt
-schedule_type: cosine
+# static schedule type is equivalent to standard MLM training (no masked diffusion)
+schedule_type: cosine  # cosine, linear, sqrt, static
 num_timesteps: 100
 weight_multiplier: 1.0
+
+mask_rate: 0.15  # only used when schedule_type=static

@@ -7,6 +7,7 @@ from .noise_schedule import (
     NoiseSchedule,
     ScheduleType,
     SqrtSchedule,
+    StaticSchedule,
     create_schedule,
 )
 from .sampler import DiffusionSampler
@@ -16,6 +17,7 @@ __all__ = [
     "LinearSchedule",
     "CosineSchedule",
     "SqrtSchedule",
+    "StaticSchedule",
     "ScheduleType",
     "create_schedule",
     "InformationWeightedMasker",

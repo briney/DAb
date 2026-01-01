@@ -105,7 +105,9 @@ def run_training(
 
     # Create noise schedule and training config
     noise_schedule = create_schedule(
-        cfg.diffusion.schedule_type, cfg.diffusion.num_timesteps
+        cfg.diffusion.schedule_type,
+        cfg.diffusion.num_timesteps,
+        mask_rate=cfg.diffusion.mask_rate,
     )
 
     training_config = TrainingConfig(
