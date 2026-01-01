@@ -205,3 +205,32 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Hydra
+outputs/
+multirun/
+
+# WandB
+wandb/
+
+# Checkpoints
+checkpoints/
+*.pt
+*.ckpt
+
+# Data
+data/
+*.csv
+*.parquet
+!tests/e2e/fixtures/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
