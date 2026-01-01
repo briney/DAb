@@ -20,7 +20,7 @@ def main() -> None:
 @click.option(
     "--config",
     "-c",
-    type=click.Path(exists=True),
+    type=click.Path(),
     default="configs",
     help="Config file (.yaml) or config directory (default: configs)",
 )

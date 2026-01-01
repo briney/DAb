@@ -47,6 +47,13 @@ def run_training(
     """
     config_path = Path(config).absolute()
 
+    # Validate config path exists
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Config path '{config}' does not exist.\n"
+            f"Provide a config file (.yaml) or config directory via --config/-c"
+        )
+
     # Determine if config is a file or directory
     if config_path.is_file():
         # Config file provided - use parent as config dir
