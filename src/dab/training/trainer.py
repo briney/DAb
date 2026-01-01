@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 from accelerate import Accelerator
@@ -27,7 +26,7 @@ class TrainingConfig:
 
     # Duration (step-driven by default)
     max_steps: int = 100000
-    max_epochs: Optional[int] = None
+    max_epochs: int | None = None
 
     # Batch size
     batch_size: int = 32
@@ -74,8 +73,8 @@ class Trainer:
         config: TrainingConfig,
         model: DAbModel,
         train_dataloader: DataLoader,
-        eval_dataloader: Optional[DataLoader] = None,
-        noise_schedule: Optional[NoiseSchedule] = None,
+        eval_dataloader: DataLoader | None = None,
+        noise_schedule: NoiseSchedule | None = None,
     ) -> None:
         self.config = config
 

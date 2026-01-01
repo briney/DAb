@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 from torch import Tensor
 
@@ -31,8 +29,8 @@ class InformationWeightedMasker:
 
     def compute_weights(
         self,
-        cdr_mask: Optional[Tensor],
-        non_templated_mask: Optional[Tensor],
+        cdr_mask: Tensor | None,
+        non_templated_mask: Tensor | None,
         attention_mask: Tensor,
     ) -> Tensor:
         batch_size, seq_len = attention_mask.shape
@@ -56,9 +54,9 @@ class InformationWeightedMasker:
         token_ids: Tensor,
         timesteps: Tensor,
         attention_mask: Tensor,
-        cdr_mask: Optional[Tensor] = None,
-        non_templated_mask: Optional[Tensor] = None,
-        special_tokens_mask: Optional[Tensor] = None,
+        cdr_mask: Tensor | None = None,
+        non_templated_mask: Tensor | None = None,
+        special_tokens_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device
@@ -116,7 +114,7 @@ class UniformMasker:
         token_ids: Tensor,
         timesteps: Tensor,
         attention_mask: Tensor,
-        special_tokens_mask: Optional[Tensor] = None,
+        special_tokens_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -37,8 +36,8 @@ class DAbEncoder:
     def __init__(
         self,
         model: DAbModel,
-        device: Union[str, torch.device] = "cpu",
-        pooling: Optional[Union[str, PoolingStrategy]] = None,
+        device: str | torch.device = "cpu",
+        pooling: str | PoolingStrategy | None = None,
     ) -> None:
         self.model = model.to(device)
         self.model.eval()
@@ -58,9 +57,9 @@ class DAbEncoder:
     @classmethod
     def from_pretrained(
         cls,
-        model_path: Union[str, Path],
+        model_path: str | Path,
         device: str = "cpu",
-        pooling: Optional[str] = None,
+        pooling: str | None = None,
     ) -> "DAbEncoder":
         """Load an encoder from a pretrained checkpoint.
 
@@ -124,7 +123,7 @@ class DAbEncoder:
         heavy_chain: str,
         light_chain: str,
         return_numpy: bool = False,
-    ) -> Union[Tensor, np.ndarray]:
+    ) -> Tensor | np.ndarray:
         """Encode a single antibody sequence pair.
 
         Parameters
@@ -170,7 +169,7 @@ class DAbEncoder:
         light_chains: list[str],
         return_numpy: bool = False,
         batch_size: int = 32,
-    ) -> Union[Tensor, np.ndarray, list]:
+    ) -> Tensor | np.ndarray | list:
         """Encode a batch of antibody sequence pairs.
 
         Parameters

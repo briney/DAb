@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -24,7 +23,7 @@ class PoolingStrategy(ABC):
 
     @abstractmethod
     def __call__(
-        self, hidden_states: Tensor, attention_mask: Optional[Tensor] = None
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
         """Apply pooling to hidden states.
 
@@ -47,7 +46,7 @@ class MeanPooling(PoolingStrategy):
     """Average pooling over sequence positions."""
 
     def __call__(
-        self, hidden_states: Tensor, attention_mask: Optional[Tensor] = None
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
         if attention_mask is None:
             return hidden_states.mean(dim=1)
@@ -62,7 +61,7 @@ class CLSPooling(PoolingStrategy):
     """Use the CLS token (first position) as the embedding."""
 
     def __call__(
-        self, hidden_states: Tensor, attention_mask: Optional[Tensor] = None
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
         return hidden_states[:, 0, :]
 
@@ -71,7 +70,7 @@ class MaxPooling(PoolingStrategy):
     """Max pooling over sequence positions."""
 
     def __call__(
-        self, hidden_states: Tensor, attention_mask: Optional[Tensor] = None
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
         if attention_mask is None:
             return hidden_states.max(dim=1).values
@@ -89,7 +88,7 @@ class MeanMaxPooling(PoolingStrategy):
         self.max_pool = MaxPooling()
 
     def __call__(
-        self, hidden_states: Tensor, attention_mask: Optional[Tensor] = None
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
         mean_out = self.mean_pool(hidden_states, attention_mask)
         max_out = self.max_pool(hidden_states, attention_mask)

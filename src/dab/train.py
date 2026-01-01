@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
@@ -17,16 +16,16 @@ from .utils import set_seed
 
 
 def run_training(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
     config_dir: str = "configs",
-    train_data: Optional[str] = None,
-    eval_data: Optional[str] = None,
+    train_data: str | None = None,
+    eval_data: str | None = None,
     output_dir: str = "outputs",
     name: str = "dab_experiment",
-    resume_from: Optional[str] = None,
+    resume_from: str | None = None,
     seed: int = 42,
     use_wandb: bool = True,
-    overrides: Optional[list[str]] = None,
+    overrides: list[str] | None = None,
 ) -> None:
     """Main training function.
 

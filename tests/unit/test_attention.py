@@ -1,9 +1,88 @@
-"""Tests for chain-aware attention."""
+"""Tests for attention modules."""
 
 import pytest
 import torch
 
-from dab.model.attention import ChainAwareAttention
+from dab.model.attention import ChainAwareAttention, MultiHeadAttention
+
+
+class TestMultiHeadAttention:
+    @pytest.fixture
+    def attention(self):
+        return MultiHeadAttention(
+            d_model=64, n_heads=4, head_dim=16, dropout=0.0, max_seq_len=128
+        )
+
+    def test_forward_shape(self, attention):
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()  # Ignored but required
+
+        out = attention(x, chain_ids)
+        assert out.shape == x.shape
+
+    def test_with_attention_mask(self, attention):
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()
+        attention_mask = torch.ones(batch, seq_len)
+        attention_mask[:, -5:] = 0  # Mask last 5 positions
+
+        out = attention(x, chain_ids, attention_mask=attention_mask)
+        assert out.shape == x.shape
+
+    def test_deterministic_without_dropout(self, attention):
+        """Test that output is deterministic without dropout."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()
+
+        attention.eval()
+        out1 = attention(x, chain_ids)
+        out2 = attention(x, chain_ids)
+
+        assert torch.allclose(out1, out2)
+
+    def test_need_weights_returns_attention(self, attention):
+        """Test that need_weights=True returns attention weights."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()
+
+        out, attn_weights = attention(x, chain_ids, need_weights=True)
+
+        assert out.shape == x.shape
+        n_heads = 4
+        assert attn_weights.shape == (batch, n_heads, seq_len, seq_len)
+
+    def test_attention_weights_sum_to_one(self, attention):
+        """Test that attention weights sum to 1 for each query position."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()
+
+        attention.eval()
+        _, attn_weights = attention(x, chain_ids, need_weights=True)
+
+        row_sums = attn_weights.sum(dim=-1)
+        assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
+
+    def test_sdpa_and_manual_consistency(self, attention):
+        """Test that SDPA and manual attention produce similar results."""
+        batch, seq_len, d_model = 2, 32, 64
+        x = torch.randn(batch, seq_len, d_model)
+        chain_ids = torch.zeros(batch, seq_len).long()
+
+        attention.eval()
+
+        # SDPA path (need_weights=False)
+        out_sdpa = attention(x, chain_ids, need_weights=False)
+
+        # Manual path (need_weights=True)
+        out_manual, _ = attention(x, chain_ids, need_weights=True)
+
+        # Should be very close
+        assert torch.allclose(out_sdpa, out_manual, atol=1e-5)
 
 
 class TestChainAwareAttention:

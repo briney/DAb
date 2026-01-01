@@ -1,19 +1,17 @@
-"""Pre-norm transformer block with chain-aware attention."""
+"""Pre-norm transformer block with configurable attention."""
 
 from __future__ import annotations
-
-from typing import Optional
 
 import torch.nn as nn
 from torch import Tensor
 
-from .attention import ChainAwareAttention
+from .attention import ChainAwareAttention, MultiHeadAttention
 from .ffn import FusedSwiGLUFFN
 
 
 class PreNormBlock(nn.Module):
     """
-    Pre-norm transformer block with chain-aware attention and SwiGLU FFN.
+    Pre-norm transformer block with configurable attention and SwiGLU FFN.
 
     Architecture:
         x = x + Attention(LayerNorm(x))
@@ -25,16 +23,20 @@ class PreNormBlock(nn.Module):
         d_model: int,
         n_heads: int,
         head_dim: int = 64,
-        d_ffn: Optional[int] = None,
+        d_ffn: int | None = None,
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
         max_seq_len: int = 512,
         layer_norm_eps: float = 1e-6,
+        use_chain_aware_attention: bool = True,
     ) -> None:
         super().__init__()
 
         self.attention_norm = nn.LayerNorm(d_model, eps=layer_norm_eps)
-        self.attention = ChainAwareAttention(
+
+        # Select attention type based on config
+        attention_cls = ChainAwareAttention if use_chain_aware_attention else MultiHeadAttention
+        self.attention = attention_cls(
             d_model=d_model,
             n_heads=n_heads,
             head_dim=head_dim,
@@ -50,7 +52,7 @@ class PreNormBlock(nn.Module):
         self,
         x: Tensor,
         chain_ids: Tensor,
-        attention_mask: Optional[Tensor] = None,
+        attention_mask: Tensor | None = None,
         output_attentions: bool = False,
     ) -> Tensor | tuple[Tensor, Tensor]:
         """
@@ -98,10 +100,11 @@ class TransformerEncoder(nn.Module):
         d_model: int,
         n_heads: int,
         head_dim: int = 64,
-        d_ffn: Optional[int] = None,
+        d_ffn: int | None = None,
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
         max_seq_len: int = 512,
+        use_chain_aware_attention: bool = True,
     ) -> None:
         super().__init__()
 
@@ -115,6 +118,7 @@ class TransformerEncoder(nn.Module):
                     dropout=dropout,
                     attention_dropout=attention_dropout,
                     max_seq_len=max_seq_len,
+                    use_chain_aware_attention=use_chain_aware_attention,
                 )
                 for _ in range(n_layers)
             ]
@@ -126,7 +130,7 @@ class TransformerEncoder(nn.Module):
         self,
         x: Tensor,
         chain_ids: Tensor,
-        attention_mask: Optional[Tensor] = None,
+        attention_mask: Tensor | None = None,
         output_hidden_states: bool = False,
         output_attentions: bool = False,
     ) -> Tensor | tuple[Tensor, tuple[Tensor, ...]] | tuple[

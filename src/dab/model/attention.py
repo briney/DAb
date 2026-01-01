@@ -1,17 +1,12 @@
 """
-Hybrid Self-Attention and Cross-Attention with chain masking.
+Attention modules for DAb transformer.
 
-Implements the MINT-style attention mechanism where:
-1. Self-attention scores (with RoPE) are computed for intra-chain pairs
-2. Cross-attention scores (without RoPE) are computed for inter-chain pairs
-3. Scores are merged before softmax based on chain membership
-4. A single softmax normalizes across all positions
-5. Weights are split after softmax for separate value multiplications
+This module provides two attention implementations:
+1. MultiHeadAttention: Standard self-attention with RoPE and SDPA optimization
+2. ChainAwareAttention: MINT-style hybrid intra/inter-chain attention
 """
 
 from __future__ import annotations
-
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -20,6 +15,147 @@ from einops import rearrange
 from torch import Tensor
 
 from .rope import RotaryPositionEmbedding
+
+
+class MultiHeadAttention(nn.Module):
+    """
+    Standard multi-head self-attention with RoPE.
+
+    Uses F.scaled_dot_product_attention for efficiency when need_weights=False,
+    allowing PyTorch to use optimized implementations (Flash Attention, etc.).
+
+    Args:
+        d_model: Model dimension
+        n_heads: Number of attention heads
+        head_dim: Dimension per head (default: 64)
+        dropout: Attention dropout probability
+        bias: Whether to use bias in projections
+        max_seq_len: Maximum sequence length for RoPE
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        head_dim: int = 64,
+        dropout: float = 0.0,
+        bias: bool = False,
+        max_seq_len: int = 512,
+    ) -> None:
+        super().__init__()
+
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = head_dim
+        self.scale = head_dim**-0.5
+        self.dropout_p = dropout
+
+        inner_dim = n_heads * head_dim
+
+        # QKV projections
+        self.q_proj = nn.Linear(d_model, inner_dim, bias=bias)
+        self.k_proj = nn.Linear(d_model, inner_dim, bias=bias)
+        self.v_proj = nn.Linear(d_model, inner_dim, bias=bias)
+
+        # Output projection
+        self.out_proj = nn.Linear(inner_dim, d_model, bias=bias)
+
+        # RoPE
+        self.rope = RotaryPositionEmbedding(head_dim, max_seq_len=max_seq_len)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def _create_padding_mask(
+        self, attention_mask: Tensor | None
+    ) -> Tensor | None:
+        """
+        Create additive padding mask for attention.
+
+        Args:
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+
+        Returns:
+            Additive mask with -inf for padding (batch, 1, 1, seq_len) or None
+        """
+        if attention_mask is None:
+            return None
+
+        # Create additive mask: 0 where valid, -inf where padding
+        padding_mask = torch.zeros_like(attention_mask, dtype=torch.float)
+        padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
+        padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
+        return padding_mask
+
+    def forward(
+        self,
+        x: Tensor,
+        chain_ids: Tensor,
+        attention_mask: Tensor | None = None,
+        need_weights: bool = False,
+    ) -> Tensor | tuple[Tensor, Tensor]:
+        """
+        Forward pass with standard self-attention.
+
+        Args:
+            x: Input tensor of shape (batch, seq_len, d_model)
+            chain_ids: Chain identity tensor of shape (batch, seq_len) - ignored
+            attention_mask: Optional padding mask of shape (batch, seq_len)
+            need_weights: If True, return attention weights (disables SDPA)
+
+        Returns:
+            If need_weights is False:
+                Output tensor of shape (batch, seq_len, d_model)
+            If need_weights is True:
+                Tuple of (output, attn_weights) where attn_weights has shape
+                (batch, n_heads, seq_len, seq_len)
+        """
+        batch_size, seq_len, _ = x.shape
+
+        # Project to Q, K, V
+        q = rearrange(self.q_proj(x), "b s (h d) -> b h s d", h=self.n_heads)
+        k = rearrange(self.k_proj(x), "b s (h d) -> b h s d", h=self.n_heads)
+        v = rearrange(self.v_proj(x), "b s (h d) -> b h s d", h=self.n_heads)
+
+        # Apply RoPE
+        q, k = self.rope(q, k)
+
+        if need_weights:
+            # Manual attention computation to get weights
+            scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+            # Apply padding mask
+            padding_mask = self._create_padding_mask(attention_mask)
+            if padding_mask is not None:
+                scores = scores + padding_mask
+
+            # Softmax and dropout
+            attn_weights = F.softmax(scores, dim=-1)
+            attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
+            attn_weights = self.dropout(attn_weights)
+
+            # Compute output
+            output = torch.matmul(attn_weights, v)
+        else:
+            # Use efficient SDPA
+            padding_mask = self._create_padding_mask(attention_mask)
+
+            output = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=padding_mask,
+                dropout_p=self.dropout_p if self.training else 0.0,
+                scale=self.scale,
+            )
+            attn_weights = None
+
+        # Reshape and project
+        output = rearrange(output, "b h s d -> b s (h d)")
+        output = self.out_proj(output)
+
+        if need_weights:
+            return output, attn_weights
+        return output
 
 
 class ChainAwareAttention(nn.Module):
@@ -80,8 +216,8 @@ class ChainAwareAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def _create_chain_mask(
-        self, chain_ids: Tensor, attention_mask: Optional[Tensor]
-    ) -> tuple[Tensor, Tensor]:
+        self, chain_ids: Tensor, attention_mask: Tensor | None
+    ) -> tuple[Tensor, Tensor | None]:
         """
         Create intra-chain mask and padding mask.
 
@@ -113,7 +249,7 @@ class ChainAwareAttention(nn.Module):
         self,
         x: Tensor,
         chain_ids: Tensor,
-        attention_mask: Optional[Tensor] = None,
+        attention_mask: Tensor | None = None,
         need_weights: bool = False,
     ) -> Tensor | tuple[Tensor, Tensor]:
         """

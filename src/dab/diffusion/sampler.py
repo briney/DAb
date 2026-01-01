@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 import torch.nn.functional as F
@@ -20,8 +20,8 @@ class DiffusionSampler:
         self,
         noise_schedule: NoiseSchedule,
         temperature: float = 1.0,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
+        top_k: int | None = None,
+        top_p: float | None = None,
     ) -> None:
         self.noise_schedule = noise_schedule
         self.temperature = temperature
@@ -60,9 +60,9 @@ class DiffusionSampler:
         batch_size: int,
         seq_len: int,
         chain_ids: Tensor,
-        attention_mask: Optional[Tensor] = None,
+        attention_mask: Tensor | None = None,
         device: torch.device = torch.device("cpu"),
-        num_steps: Optional[int] = None,
+        num_steps: int | None = None,
         show_progress: bool = True,
     ) -> Tensor:
         """
@@ -132,8 +132,8 @@ class DiffusionSampler:
         token_ids: Tensor,
         chain_ids: Tensor,
         mask_positions: Tensor,
-        attention_mask: Optional[Tensor] = None,
-        num_steps: Optional[int] = None,
+        attention_mask: Tensor | None = None,
+        num_steps: int | None = None,
         show_progress: bool = True,
     ) -> Tensor:
         """

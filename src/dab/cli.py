@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -48,13 +47,13 @@ def main() -> None:
 @click.option("--wandb/--no-wandb", default=True, help="Enable/disable WandB")
 @click.argument("overrides", nargs=-1)
 def train(
-    config: Optional[str],
+    config: str | None,
     config_dir: str,
     train_data: str,
-    eval_data: Optional[str],
+    eval_data: str | None,
     output_dir: str,
     name: str,
-    resume: Optional[str],
+    resume: str | None,
     seed: int,
     wandb: bool,
     overrides: tuple[str, ...],
@@ -112,7 +111,7 @@ def encode(
     output: str,
     pooling: str,
     batch_size: int,
-    device: Optional[str],
+    device: str | None,
 ) -> None:
     """Encode antibody sequences using a trained model.
 

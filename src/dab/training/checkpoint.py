@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.optim import Optimizer
@@ -31,7 +31,7 @@ class CheckpointManager:
         config: CheckpointConfig,
         model: torch.nn.Module,
         optimizer: Optimizer,
-        scheduler: Optional[_LRScheduler] = None,
+        scheduler: _LRScheduler | None = None,
     ) -> None:
         self.config = config
         self.model = model
@@ -41,7 +41,7 @@ class CheckpointManager:
         self.save_dir = Path(config.save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
-        self.best_metric_value: Optional[float] = None
+        self.best_metric_value: float | None = None
         self.saved_checkpoints: list[Path] = []
 
     def _is_better(self, current: float, best: float) -> bool:
@@ -53,9 +53,9 @@ class CheckpointManager:
         self,
         step: int,
         epoch: int,
-        metrics: Optional[dict[str, float]] = None,
-        extra_state: Optional[dict[str, Any]] = None,
-    ) -> Optional[Path]:
+        metrics: dict[str, float] | None = None,
+        extra_state: dict[str, Any] | None = None,
+    ) -> Path | None:
         """Save a checkpoint."""
         checkpoint = {
             "step": step,
@@ -96,7 +96,7 @@ class CheckpointManager:
 
     def load(
         self,
-        checkpoint_path: Optional[str] = None,
+        checkpoint_path: str | None = None,
         load_best: bool = False,
         map_location: str = "cpu",
     ) -> dict[str, Any]:

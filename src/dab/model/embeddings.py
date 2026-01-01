@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -65,7 +64,7 @@ class LearnedTimestepEmbedding(nn.Module):
         self,
         d_model: int,
         max_timesteps: int = 1000,
-        hidden_dim: Optional[int] = None,
+        hidden_dim: int | None = None,
     ) -> None:
         super().__init__()
         hidden_dim = hidden_dim or d_model * 4
@@ -112,7 +111,7 @@ class DAbEmbedding(nn.Module):
     def forward(
         self,
         token_ids: Tensor,
-        timesteps: Optional[Tensor] = None,
+        timesteps: Tensor | None = None,
     ) -> Tensor:
         embeddings = self.token_embedding(token_ids)
 

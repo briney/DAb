@@ -159,3 +159,58 @@ class TestDAbModel:
     def test_weight_tying(self, model):
         """Test that embedding weights are tied to lm_head."""
         assert model.lm_head.weight is model.embeddings.token_embedding.embedding.weight
+
+    def test_standard_attention_mode(self):
+        """Test model with standard MultiHeadAttention instead of ChainAwareAttention."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            head_dim=32,
+            max_seq_len=64,
+            dropout=0.0,
+            use_chain_aware_attention=False,  # Use standard attention
+        )
+        model = DAbModel(config)
+
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(0, 32, (batch_size, seq_len))
+        chain_ids = torch.zeros(batch_size, seq_len).long()
+
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert outputs["logits"].shape == (batch_size, seq_len, 32)
+
+    def test_attention_mode_comparison(self):
+        """Test that both attention modes produce valid outputs with same config."""
+        base_config = dict(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            head_dim=32,
+            max_seq_len=64,
+            dropout=0.0,
+        )
+
+        # Create both models
+        chain_aware_model = DAbModel(DAbConfig(**base_config, use_chain_aware_attention=True))
+        standard_model = DAbModel(DAbConfig(**base_config, use_chain_aware_attention=False))
+
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(0, 32, (batch_size, seq_len))
+        chain_ids = torch.zeros(batch_size, seq_len).long()
+
+        chain_aware_model.eval()
+        standard_model.eval()
+
+        with torch.no_grad():
+            out1 = chain_aware_model(token_ids, chain_ids)
+            out2 = standard_model(token_ids, chain_ids)
+
+        # Both should produce valid outputs with same shape
+        assert out1["logits"].shape == out2["logits"].shape
+        assert not torch.isnan(out1["logits"]).any()
+        assert not torch.isnan(out2["logits"]).any()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -24,7 +23,7 @@ class MetricAccumulator:
         self._values[name] += value * count
         self._counts[name] += count
 
-    def compute(self, name: str) -> Optional[float]:
+    def compute(self, name: str) -> float | None:
         if name not in self._values or self._counts[name] == 0:
             return None
         return self._values[name] / self._counts[name]

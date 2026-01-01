@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 try:
     import wandb
@@ -18,11 +18,11 @@ class WandbLogger:
     def __init__(
         self,
         project: str,
-        name: Optional[str] = None,
-        config: Optional[dict[str, Any]] = None,
-        entity: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        notes: Optional[str] = None,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
+        entity: str | None = None,
+        tags: list[str] | None = None,
+        notes: str | None = None,
         resume: bool = False,
         enabled: bool = True,
     ) -> None:
@@ -43,7 +43,7 @@ class WandbLogger:
         )
 
     def log(
-        self, metrics: dict[str, Any], step: Optional[int] = None, commit: bool = True
+        self, metrics: dict[str, Any], step: int | None = None, commit: bool = True
     ) -> None:
         """Log metrics to WandB."""
         if not self.enabled:
@@ -55,7 +55,7 @@ class WandbLogger:
         artifact_path: str,
         name: str,
         artifact_type: str = "model",
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Log an artifact to WandB."""
         if not self.enabled:
@@ -77,14 +77,14 @@ class WandbLogger:
         wandb.finish()
 
     @property
-    def run_id(self) -> Optional[str]:
+    def run_id(self) -> str | None:
         """Get the WandB run ID."""
         if not self.enabled or self.run is None:
             return None
         return self.run.id
 
     @property
-    def run_url(self) -> Optional[str]:
+    def run_url(self) -> str | None:
         """Get the WandB run URL."""
         if not self.enabled or self.run is None:
             return None

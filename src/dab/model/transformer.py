@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -25,7 +24,7 @@ class DAbConfig:
     n_layers: int = 16
     n_heads: int = 4
     head_dim: int = 64
-    d_ffn: Optional[int] = None
+    d_ffn: int | None = None
 
     max_seq_len: int = 320
     max_timesteps: int = 100
@@ -34,6 +33,10 @@ class DAbConfig:
     dropout: float = 0.1
     attention_dropout: float = 0.1
     embedding_dropout: float = 0.1
+
+    # If True, use ChainAwareAttention (MINT-style hybrid attention)
+    # If False, use standard MultiHeadAttention
+    use_chain_aware_attention: bool = True
 
     def __post_init__(self) -> None:
         if self.d_ffn is None:
@@ -70,6 +73,7 @@ class DAbModel(nn.Module):
             dropout=config.dropout,
             attention_dropout=config.attention_dropout,
             max_seq_len=config.max_seq_len,
+            use_chain_aware_attention=config.use_chain_aware_attention,
         )
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
@@ -94,8 +98,8 @@ class DAbModel(nn.Module):
         self,
         token_ids: Tensor,
         chain_ids: Tensor,
-        attention_mask: Optional[Tensor] = None,
-        timesteps: Optional[Tensor] = None,
+        attention_mask: Tensor | None = None,
+        timesteps: Tensor | None = None,
         output_hidden_states: bool = False,
         output_attentions: bool = False,
     ) -> dict[str, Tensor | tuple[Tensor, ...]]:
