@@ -146,6 +146,38 @@ class TestCreateScheduler:
         assert mid_lr > expected_min
 
 
+    def test_warmup_equals_training_steps(self, tiny_model):
+        """Test that scheduler doesn't crash when warmup_steps == num_training_steps."""
+        optimizer = create_optimizer(tiny_model)
+
+        # This should not raise ZeroDivisionError
+        scheduler = create_scheduler(
+            optimizer,
+            scheduler_decay="cosine",
+            num_training_steps=1000,
+            num_warmup_steps=1000,  # Equal to training steps
+        )
+
+        # Run through all steps - should not crash
+        for _ in range(1000):
+            scheduler.step()
+
+    def test_warmup_exceeds_training_steps(self, tiny_model):
+        """Test that scheduler handles warmup > training steps gracefully."""
+        optimizer = create_optimizer(tiny_model)
+
+        scheduler = create_scheduler(
+            optimizer,
+            scheduler_decay="linear",
+            num_training_steps=100,
+            num_warmup_steps=1000,  # More than training steps
+        )
+
+        # Run through all steps - should not crash
+        for _ in range(100):
+            scheduler.step()
+
+
 class TestGetLR:
     def test_get_lr(self, tiny_model):
         lr = 3e-4

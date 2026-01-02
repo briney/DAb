@@ -62,11 +62,13 @@ def create_scheduler(
         warmup = LinearLR(
             optimizer, start_factor=1e-8, end_factor=1.0, total_iters=num_warmup_steps
         )
+        # Ensure total_iters is at least 1 to avoid edge cases
+        decay_iters = max(1, num_training_steps - num_warmup_steps)
         decay = LinearLR(
             optimizer,
             start_factor=1.0,
             end_factor=min_lr_ratio,
-            total_iters=num_training_steps - num_warmup_steps,
+            total_iters=decay_iters,
         )
         return SequentialLR(
             optimizer, schedulers=[warmup, decay], milestones=[num_warmup_steps]
@@ -78,9 +80,9 @@ def create_scheduler(
         )
         base_lr = optimizer.param_groups[0]["lr"]
         min_lr = base_lr * min_lr_ratio
-        cosine = CosineAnnealingLR(
-            optimizer, T_max=num_training_steps - num_warmup_steps, eta_min=min_lr
-        )
+        # Ensure T_max is at least 1 to avoid division by zero
+        t_max = max(1, num_training_steps - num_warmup_steps)
+        cosine = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=min_lr)
         return SequentialLR(
             optimizer, schedulers=[warmup, cosine], milestones=[num_warmup_steps]
         )
