@@ -358,23 +358,37 @@ class Trainer:
 
                     self.metrics.update("train_loss", loss.item())
 
+                    # Pre-compute conditions for this step
+                    should_log = self.global_step % self.config.log_steps == 0
+                    should_eval = (
+                        self.config.eval_steps > 0
+                        and self.global_step % self.config.eval_steps == 0
+                    )
+                    should_checkpoint = self.checkpoint_manager.should_save(self.global_step)
+
+                    # Cache eval results to avoid running eval twice
+                    all_eval_metrics: dict[str, dict[str, float]] | None = None
+
                     # Logging
-                    if self.global_step % self.config.log_steps == 0:
+                    if should_log:
                         log_metrics = self.metrics.compute_all()
                         log_metrics["learning_rate"] = get_lr(self.optimizer)
                         log_metrics["epoch"] = self.epoch
                         log_metrics["step"] = self.global_step
 
                         if self.logger is not None:
-                            self.logger.log(log_metrics, step=self.global_step)
+                            # Use commit=False if eval will also log at this step
+                            # to avoid wandb non-monotonic step warnings
+                            self.logger.log(
+                                log_metrics,
+                                step=self.global_step,
+                                commit=not should_eval,
+                            )
 
                         self.metrics.reset()
 
                     # Evaluation
-                    if (
-                        self.config.eval_steps > 0
-                        and self.global_step % self.config.eval_steps == 0
-                    ):
+                    if should_eval:
                         all_eval_metrics = self.evaluate_all()
                         if self.logger is not None and all_eval_metrics:
                             # Use log_eval_all if available, otherwise flatten and log
@@ -390,18 +404,21 @@ class Trainer:
                                         flat_metrics[f"{eval_name}/{metric_name}"] = value
                                 self.logger.log(flat_metrics, step=self.global_step)
 
-                    # Checkpointing
-                    if self.checkpoint_manager.should_save(self.global_step):
-                        # Get metrics for checkpoint (use first eval dataset or run eval)
-                        if self.eval_dataloaders:
+                    # Checkpointing - reuse eval results if already computed
+                    if should_checkpoint:
+                        # Only run eval if we haven't already at this step
+                        if all_eval_metrics is None and self.eval_dataloaders:
                             all_eval_metrics = self.evaluate_all()
-                            # Flatten for checkpoint manager
+
+                        # Flatten for checkpoint manager
+                        if all_eval_metrics:
                             eval_metrics = {}
                             for eval_name, metrics in all_eval_metrics.items():
                                 for metric_name, value in metrics.items():
                                     eval_metrics[f"{eval_name}/{metric_name}"] = value
                         else:
                             eval_metrics = {}
+
                         self.checkpoint_manager.save(
                             step=self.global_step, epoch=self.epoch, metrics=eval_metrics
                         )
