@@ -43,6 +43,11 @@ dab train data.train=data.csv model=small              # Use small model config
 dab train -c my_config.yaml data.train=data.csv        # Use custom config file
 dab train -c /path/to/configs data.train=data.csv      # Use custom config dir
 
+# Model size (trainable parameters)
+dab model-size                                         # Default (base) model
+dab model-size model=small                             # Small model config
+dab model-size model.n_layers=32 model.d_model=512     # Custom overrides
+
 # Encoding/inference
 dab encode -c checkpoint.pt -i sequences.csv -o embeddings.pt
 ```

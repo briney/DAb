@@ -157,5 +157,98 @@ def encode(
     click.echo("Done!")
 
 
+@main.command("model-size")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(),
+    default="configs",
+    help="Config file (.yaml) or config directory (default: configs)",
+)
+@click.argument("overrides", nargs=-1)
+def model_size(
+    config: str,
+    overrides: tuple[str, ...],
+) -> None:
+    """Get the number of trainable parameters for a model configuration.
+
+    Examples:
+
+        dab model-size
+
+        dab model-size model=small
+
+        dab model-size model=large model.n_layers=32
+    """
+    import importlib.resources
+    from contextlib import ExitStack
+
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    from .model import DAbConfig, DAbModel
+
+    with ExitStack() as stack:
+        # Handle default/bundled configs
+        if config is None or config == "configs":
+            local_configs = Path("configs").absolute()
+            if local_configs.exists() and local_configs.is_dir():
+                config_dir = local_configs
+            else:
+                config_dir = stack.enter_context(
+                    importlib.resources.as_file(
+                        importlib.resources.files("dab").joinpath("configs")
+                    )
+                )
+            config_name = "config"
+        else:
+            config_path = Path(config).absolute()
+
+            if not config_path.exists():
+                raise click.ClickException(
+                    f"Config path '{config}' does not exist.\n"
+                    f"Provide a config file (.yaml) or config directory via --config/-c"
+                )
+
+            if config_path.is_file():
+                config_dir = config_path.parent
+                config_name = config_path.stem
+            else:
+                config_dir = config_path
+                config_name = "config"
+
+        stack.enter_context(
+            initialize_config_dir(config_dir=str(config_dir), version_base=None)
+        )
+
+        cfg = compose(config_name=config_name, overrides=list(overrides))
+
+    # Create model config
+    model_config = DAbConfig(
+        vocab_size=cfg.model.vocab_size,
+        padding_idx=cfg.model.padding_idx,
+        d_model=cfg.model.d_model,
+        n_layers=cfg.model.n_layers,
+        n_heads=cfg.model.n_heads,
+        d_ffn=cfg.model.d_ffn,
+        ffn_multiplier=cfg.model.ffn_multiplier,
+        max_seq_len=cfg.model.max_seq_len,
+        max_timesteps=cfg.model.max_timesteps,
+        use_timestep_embedding=cfg.model.use_timestep_embedding,
+        dropout=cfg.model.dropout,
+        attention_dropout=cfg.model.attention_dropout,
+        embedding_dropout=cfg.model.embedding_dropout,
+        use_chain_aware_attention=cfg.model.use_chain_aware_attention,
+    )
+
+    # Create model and get parameter count
+    model = DAbModel(model_config)
+    num_params = model.get_num_params()
+
+    # Print results
+    click.echo(f"Model configuration: {OmegaConf.to_yaml(cfg.model)}")
+    click.echo(f"Trainable parameters: {num_params:,}")
+
+
 if __name__ == "__main__":
     main()
