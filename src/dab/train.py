@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from accelerate import Accelerator
 from hydra import compose, initialize_config_dir
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from .data import create_eval_dataloaders, create_train_dataloader
 from .diffusion import create_schedule
@@ -19,52 +19,37 @@ from .training import Trainer, TrainingConfig
 from .utils import set_seed
 
 
-def run_training(
-    config: str | None = None,
-    output_dir: str = "outputs",
-    name: str = "dab_experiment",
-    resume_from: str | None = None,
-    seed: int = 42,
-    use_wandb: bool = True,
-    overrides: list[str] | None = None,
-) -> None:
-    """Main training function.
+def _load_config(
+    config: str | None,
+    name: str,
+    seed: int,
+    output_dir: str,
+    overrides: list[str] | None,
+) -> DictConfig:
+    """Load configuration - runs identically on all processes.
+
+    This function must be deterministic across all distributed processes
+    to ensure they have identical configuration state before Accelerator
+    initialization.
 
     Parameters
     ----------
     config
-        Path to config file (.yaml/.yml) or config directory. If a file is
-        provided, its parent directory is used as the config directory.
-        If None or "configs", uses bundled default configs.
-    output_dir
-        Output directory for checkpoints and logs.
+        Path to config file (.yaml/.yml) or config directory.
     name
         Experiment name.
-    resume_from
-        Optional checkpoint path to resume from.
     seed
         Random seed.
-    use_wandb
-        Whether to enable WandB logging.
+    output_dir
+        Output directory.
     overrides
-        List of Hydra config overrides (including data.train for training data).
+        List of Hydra config overrides.
+
+    Returns
+    -------
+    DictConfig
+        Loaded configuration.
     """
-    # Create Accelerator EARLY - before any heavy operations
-    # This ensures proper distributed initialization across all processes
-    accelerator = Accelerator()
-    is_main = accelerator.is_main_process
-
-    # Handle wandb login early (before any heavy lifting) so users get
-    # prompted immediately if they need to authenticate
-    if use_wandb and is_main:
-        try:
-            import wandb
-
-            # This will prompt for login if not already authenticated
-            wandb.login()
-        except ImportError:
-            pass  # wandb not installed, will be handled later
-
     with ExitStack() as stack:
         # Handle default/bundled configs
         if config is None or config == "configs":
@@ -103,6 +88,7 @@ def run_training(
         stack.enter_context(
             initialize_config_dir(config_dir=str(config_dir), version_base=None)
         )
+
         override_list = overrides or []
         override_list.extend([f"name={name}", f"seed={seed}"])
         # Only override output_dir if explicitly provided (not default)
@@ -110,21 +96,86 @@ def run_training(
         if output_dir != "outputs":
             override_list.append(f"output_dir={output_dir}")
 
-        cfg = compose(config_name=config_name, overrides=override_list)
+        return compose(config_name=config_name, overrides=override_list)
+
+
+def run_training(
+    config: str | None = None,
+    output_dir: str = "outputs",
+    name: str = "dab_experiment",
+    resume_from: str | None = None,
+    seed: int = 42,
+    use_wandb: bool = True,
+    overrides: list[str] | None = None,
+) -> None:
+    """Main training function.
+
+    Parameters
+    ----------
+    config
+        Path to config file (.yaml/.yml) or config directory. If a file is
+        provided, its parent directory is used as the config directory.
+        If None or "configs", uses bundled default configs.
+    output_dir
+        Output directory for checkpoints and logs.
+    name
+        Experiment name.
+    resume_from
+        Optional checkpoint path to resume from.
+    seed
+        Random seed.
+    use_wandb
+        Whether to enable WandB logging.
+    overrides
+        List of Hydra config overrides (including data.train for training data).
+    """
+    # ==================================================================
+    # PHASE 1: Pre-distributed setup (ALL processes do this identically)
+    # ==================================================================
+
+    # 1. Load config FIRST (before any distributed operations)
+    # All processes must have identical config before Accelerator init
+    cfg = _load_config(config, name, seed, output_dir, overrides)
+
+    # 2. Set seed BEFORE Accelerator (ensures RNG synchronization)
+    set_seed(cfg.seed)
+
+    # ==================================================================
+    # PHASE 2: Distributed initialization
+    # ==================================================================
+
+    # 3. Create Accelerator (NOW all processes are in sync with same state)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=cfg.train.gradient_accumulation_steps,
+    )
+    is_main = accelerator.is_main_process
+
+    # 4. wandb login (early, but AFTER Accelerator - main process only)
+    if use_wandb and is_main:
+        try:
+            import wandb
+
+            # This will prompt for login if not already authenticated
+            wandb.login()
+        except ImportError:
+            pass  # wandb not installed, will be handled later
+
+    # ==================================================================
+    # PHASE 3: Main-process-only I/O
+    # ==================================================================
 
     if is_main:
         print(OmegaConf.to_yaml(cfg), flush=True)
-
-    set_seed(cfg.seed)
-
-    # Only main process creates output directory and saves config
-    if is_main:
         output_path = Path(cfg.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(cfg, output_path / "config.yaml")
 
-    # Synchronize all processes before heavy operations
+    # 5. Synchronize AFTER all divergent operations
     accelerator.wait_for_everyone()
+
+    # ==================================================================
+    # PHASE 4: Parallel operations (all processes)
+    # ==================================================================
 
     # Create model
     model_config = DAbConfig(
