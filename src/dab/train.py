@@ -6,6 +6,8 @@ import importlib.resources
 from contextlib import ExitStack
 from pathlib import Path
 
+from accelerate import Accelerator
+from accelerate.state import PartialState
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 
@@ -15,6 +17,21 @@ from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
 from .training import Trainer, TrainingConfig
 from .utils import set_seed
+
+
+def _is_main_process() -> bool:
+    """Check if current process is the main process."""
+    state = PartialState()
+    return state.is_main_process
+
+
+def _print_main(accelerator: Accelerator | None = None, *args, **kwargs) -> None:
+    """Print only on main process."""
+    if accelerator is not None:
+        if accelerator.is_main_process:
+            print(*args, **kwargs)
+    elif _is_main_process():
+        print(*args, **kwargs)
 
 
 def run_training(
@@ -47,6 +64,17 @@ def run_training(
     overrides
         List of Hydra config overrides (including data.train for training data).
     """
+    # Handle wandb login early (before any heavy lifting) so users get
+    # prompted immediately if they need to authenticate
+    if use_wandb and _is_main_process():
+        try:
+            import wandb
+
+            # This will prompt for login if not already authenticated
+            wandb.login()
+        except ImportError:
+            pass  # wandb not installed, will be handled later
+
     with ExitStack() as stack:
         # Handle default/bundled configs
         if config is None or config == "configs":
@@ -92,13 +120,15 @@ def run_training(
 
         cfg = compose(config_name=config_name, overrides=override_list)
 
-    print(OmegaConf.to_yaml(cfg))
+    _print_main(None, OmegaConf.to_yaml(cfg))
 
     set_seed(cfg.seed)
 
-    output_path = Path(cfg.output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    OmegaConf.save(cfg, output_path / "config.yaml")
+    # Only main process creates output directory and saves config
+    if _is_main_process():
+        output_path = Path(cfg.output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        OmegaConf.save(cfg, output_path / "config.yaml")
 
     # Create model
     model_config = DAbConfig(
@@ -117,7 +147,7 @@ def run_training(
         embedding_dropout=cfg.model.embedding_dropout,
     )
     model = DAbModel(model_config)
-    print(f"Model parameters: {model.get_num_params():,}")
+    _print_main(None, f"Model parameters: {model.get_num_params():,}")
 
     # Create train dataloader (handles single or multi-dataset automatically)
     train_loader = create_train_dataloader(
@@ -172,8 +202,8 @@ def run_training(
         noise_schedule=noise_schedule,
     )
 
-    # Set up logging
-    if use_wandb and cfg.log.wandb.enabled:
+    # Set up logging (only on main process)
+    if use_wandb and cfg.log.wandb.enabled and trainer.accelerator.is_main_process:
         logger = WandbLogger(
             project=cfg.log.wandb.project,
             name=cfg.name,
@@ -186,7 +216,7 @@ def run_training(
 
     # Resume if specified
     if resume_from:
-        print(f"Resuming from {resume_from}")
+        _print_main(trainer.accelerator, f"Resuming from {resume_from}")
         trainer.checkpoint_manager.load(resume_from)
 
     # Train
