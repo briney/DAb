@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -84,9 +85,10 @@ class Trainer:
     ) -> None:
         self.config = config
 
+        # Let accelerate handle mixed_precision from its config (accelerate config)
+        # rather than overriding with our config value
         self.accelerator = Accelerator(
             gradient_accumulation_steps=config.gradient_accumulation_steps,
-            mixed_precision=config.mixed_precision,
         )
 
         self.optimizer = create_optimizer(
@@ -329,6 +331,7 @@ class Trainer:
             total=total_steps,
             desc="Training",
             disable=not self.accelerator.is_local_main_process,
+            file=sys.stdout,  # Explicit stdout for proper flushing with accelerate
         )
         progress_bar.update(self.global_step)
 

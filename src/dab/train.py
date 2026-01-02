@@ -29,9 +29,9 @@ def _print_main(accelerator: Accelerator | None = None, *args, **kwargs) -> None
     """Print only on main process."""
     if accelerator is not None:
         if accelerator.is_main_process:
-            print(*args, **kwargs)
+            print(*args, flush=True, **kwargs)
     elif _is_main_process():
-        print(*args, **kwargs)
+        print(*args, flush=True, **kwargs)
 
 
 def run_training(
@@ -114,9 +114,11 @@ def run_training(
             initialize_config_dir(config_dir=str(config_dir), version_base=None)
         )
         override_list = overrides or []
-        override_list.extend(
-            [f"name={name}", f"seed={seed}", f"output_dir={output_dir}"]
-        )
+        override_list.extend([f"name={name}", f"seed={seed}"])
+        # Only override output_dir if explicitly provided (not default)
+        # This allows the config's output_dir: outputs/${name} interpolation to work
+        if output_dir != "outputs":
+            override_list.append(f"output_dir={output_dir}")
 
         cfg = compose(config_name=config_name, overrides=override_list)
 
