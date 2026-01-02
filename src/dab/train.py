@@ -6,8 +6,8 @@ import importlib.resources
 from contextlib import ExitStack
 from pathlib import Path
 
+import torch
 from accelerate import Accelerator
-from accelerate.state import PartialState
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 
@@ -17,21 +17,6 @@ from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
 from .training import Trainer, TrainingConfig
 from .utils import set_seed
-
-
-def _is_main_process() -> bool:
-    """Check if current process is the main process."""
-    state = PartialState()
-    return state.is_main_process
-
-
-def _print_main(accelerator: Accelerator | None = None, *args, **kwargs) -> None:
-    """Print only on main process."""
-    if accelerator is not None:
-        if accelerator.is_main_process:
-            print(*args, flush=True, **kwargs)
-    elif _is_main_process():
-        print(*args, flush=True, **kwargs)
 
 
 def run_training(
@@ -64,9 +49,14 @@ def run_training(
     overrides
         List of Hydra config overrides (including data.train for training data).
     """
+    # Create Accelerator EARLY - before any heavy operations
+    # This ensures proper distributed initialization across all processes
+    accelerator = Accelerator()
+    is_main = accelerator.is_main_process
+
     # Handle wandb login early (before any heavy lifting) so users get
     # prompted immediately if they need to authenticate
-    if use_wandb and _is_main_process():
+    if use_wandb and is_main:
         try:
             import wandb
 
@@ -122,15 +112,19 @@ def run_training(
 
         cfg = compose(config_name=config_name, overrides=override_list)
 
-    _print_main(None, OmegaConf.to_yaml(cfg))
+    if is_main:
+        print(OmegaConf.to_yaml(cfg), flush=True)
 
     set_seed(cfg.seed)
 
     # Only main process creates output directory and saves config
-    if _is_main_process():
+    if is_main:
         output_path = Path(cfg.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(cfg, output_path / "config.yaml")
+
+    # Synchronize all processes before heavy operations
+    accelerator.wait_for_everyone()
 
     # Create model
     model_config = DAbConfig(
@@ -149,7 +143,8 @@ def run_training(
         embedding_dropout=cfg.model.embedding_dropout,
     )
     model = DAbModel(model_config)
-    _print_main(None, f"Model parameters: {model.get_num_params():,}")
+    if is_main:
+        print(f"Model parameters: {model.get_num_params():,}", flush=True)
 
     # Create train dataloader (handles single or multi-dataset automatically)
     train_loader = create_train_dataloader(
@@ -195,17 +190,31 @@ def run_training(
         mixed_precision=cfg.train.mixed_precision,
     )
 
-    # Create trainer with eval dataloaders
+    # Create trainer with pre-created accelerator
     trainer = Trainer(
         config=training_config,
         model=model,
         train_dataloader=train_loader,
         eval_dataloaders=eval_dataloaders if eval_dataloaders else None,
         noise_schedule=noise_schedule,
+        accelerator=accelerator,
     )
 
+    # Warn if multi-GPU available but not being used
+    if is_main:
+        num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        world_size = accelerator.num_processes
+        if world_size == 1 and num_gpus > 1:
+            print(
+                f"WARNING: {num_gpus} GPUs detected but only 1 process active.\n"
+                f"For multi-GPU training, use: accelerate launch -m dab.train ...",
+                flush=True,
+            )
+        elif world_size > 1:
+            print(f"Distributed training with {world_size} processes", flush=True)
+
     # Set up logging (only on main process)
-    if use_wandb and cfg.log.wandb.enabled and trainer.accelerator.is_main_process:
+    if use_wandb and cfg.log.wandb.enabled and is_main:
         logger = WandbLogger(
             project=cfg.log.wandb.project,
             name=cfg.name,
@@ -218,7 +227,8 @@ def run_training(
 
     # Resume if specified
     if resume_from:
-        _print_main(trainer.accelerator, f"Resuming from {resume_from}")
+        if is_main:
+            print(f"Resuming from {resume_from}", flush=True)
         trainer.checkpoint_manager.load(resume_from)
 
     # Train

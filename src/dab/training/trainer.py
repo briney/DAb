@@ -82,14 +82,19 @@ class Trainer:
         eval_dataloaders: dict[str, DataLoader] | None = None,
         noise_schedule: NoiseSchedule | None = None,
         evaluator: "Evaluator | None" = None,
+        accelerator: Accelerator | None = None,
     ) -> None:
         self.config = config
 
-        # Let accelerate handle mixed_precision from its config (accelerate config)
-        # rather than overriding with our config value
-        self.accelerator = Accelerator(
-            gradient_accumulation_steps=config.gradient_accumulation_steps,
-        )
+        # Use provided accelerator or create a new one
+        if accelerator is not None:
+            self.accelerator = accelerator
+        else:
+            # Let accelerate handle mixed_precision from its config (accelerate config)
+            # rather than overriding with our config value
+            self.accelerator = Accelerator(
+                gradient_accumulation_steps=config.gradient_accumulation_steps,
+            )
 
         self.optimizer = create_optimizer(
             model,
@@ -327,6 +332,9 @@ class Trainer:
         else:
             total_steps = self.config.max_steps
 
+        if self.accelerator.is_main_process:
+            print(f"Starting training for {total_steps} steps...", flush=True)
+
         progress_bar = tqdm(
             total=total_steps,
             desc="Training",
@@ -405,7 +413,8 @@ class Trainer:
                                 self.logger.log(flat_metrics, step=self.global_step)
 
                     # Checkpointing - reuse eval results if already computed
-                    if should_checkpoint:
+                    # Only save checkpoints on main process to avoid file conflicts
+                    if should_checkpoint and self.accelerator.is_main_process:
                         # Only run eval if we haven't already at this step
                         if all_eval_metrics is None and self.eval_dataloaders:
                             all_eval_metrics = self.evaluate_all()
