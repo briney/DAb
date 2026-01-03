@@ -184,24 +184,58 @@ def _infer_framework_regions(
     return fw_regions
 
 
+def _extract_cdr_boundaries(
+    cdr_mask: Tensor,
+    chain_mask: Tensor,
+) -> list[tuple[int, int]]:
+    """Extract CDR region boundaries from detailed CDR mask.
+
+    Uses mask values (1=CDR1, 2=CDR2, 3=CDR3) to find CDR boundaries
+    within a single chain.
+
+    Parameters
+    ----------
+    cdr_mask
+        1D tensor with values 0=FW, 1=CDR1, 2=CDR2, 3=CDR3.
+    chain_mask
+        1D boolean mask indicating positions belonging to this chain.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        List of (start, end) indices for CDR1, CDR2, CDR3 in order.
+        Indices are inclusive start, exclusive end.
+    """
+    regions = []
+
+    for cdr_value in [1, 2, 3]:  # CDR1, CDR2, CDR3
+        cdr_positions = ((cdr_mask == cdr_value) & chain_mask).nonzero(as_tuple=True)[0]
+        if len(cdr_positions) > 0:
+            start = cdr_positions[0].item()
+            end = cdr_positions[-1].item() + 1
+            regions.append((start, end))
+
+    return regions
+
+
 def extract_region_masks(
     batch: dict[str, Tensor],
     regions: set[AntibodyRegion] | None = None,
 ) -> dict[AntibodyRegion, Tensor]:
     """Extract per-region boolean masks from batch data.
 
-    Uses cdr_mask to identify CDR positions, then infers framework regions
-    from gaps between CDRs. Regions are identified per chain using chain_ids.
+    Uses detailed cdr_mask values (0=FW, 1=CDR1, 2=CDR2, 3=CDR3) for direct
+    region identification. Framework regions are inferred from non-CDR positions.
 
     The sequence format is assumed to be: [CLS] heavy_chain light_chain [EOS]
     - chain_ids: 0 for CLS and heavy chain, 1 for light chain and EOS
-    - cdr_mask: 1 for CDR positions, 0 elsewhere
+    - cdr_mask: 0 for FW, 1 for CDR1, 2 for CDR2, 3 for CDR3
 
     Parameters
     ----------
     batch
         Batch dictionary with:
-        - cdr_mask: (batch, seq_len) CDR position mask
+        - cdr_mask: (batch, seq_len) detailed CDR mask (0=FW, 1=CDR1, 2=CDR2, 3=CDR3)
         - chain_ids: (batch, seq_len) chain identifiers (0=heavy, 1=light)
         - attention_mask: (batch, seq_len) valid position mask
         - special_tokens_mask: (batch, seq_len) optional special tokens mask
@@ -233,82 +267,96 @@ def extract_region_masks(
     for region in regions:
         result[region] = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=device)
 
-    # Process each sequence in the batch
-    for b in range(batch_size):
-        seq_cdr_mask = cdr_mask[b].bool()
-        seq_chain_ids = chain_ids[b]
-        seq_attention = attention_mask[b].bool()
-        seq_special = special_tokens_mask[b] if special_tokens_mask is not None else None
+    # Create chain masks (excluding special tokens if present)
+    heavy_chain_mask = (chain_ids == 0) & attention_mask.bool()
+    light_chain_mask = (chain_ids == 1) & attention_mask.bool()
 
-        # Create chain masks (excluding special tokens if present)
-        heavy_chain_mask = (seq_chain_ids == 0) & seq_attention
-        light_chain_mask = (seq_chain_ids == 1) & seq_attention
+    if special_tokens_mask is not None:
+        heavy_chain_mask = heavy_chain_mask & ~special_tokens_mask.bool()
+        light_chain_mask = light_chain_mask & ~special_tokens_mask.bool()
 
-        if seq_special is not None:
-            heavy_chain_mask = heavy_chain_mask & ~seq_special.bool()
-            light_chain_mask = light_chain_mask & ~seq_special.bool()
+    # Direct CDR extraction using detailed mask values (vectorized)
+    cdr1_mask = cdr_mask == 1
+    cdr2_mask = cdr_mask == 2
+    cdr3_mask = cdr_mask == 3
 
-        # Find chain boundaries
-        heavy_positions = heavy_chain_mask.nonzero(as_tuple=True)[0]
-        light_positions = light_chain_mask.nonzero(as_tuple=True)[0]
+    # Assign CDR regions by chain (vectorized across batch)
+    if AntibodyRegion.CDR1_H in regions:
+        result[AntibodyRegion.CDR1_H] = cdr1_mask & heavy_chain_mask
+    if AntibodyRegion.CDR2_H in regions:
+        result[AntibodyRegion.CDR2_H] = cdr2_mask & heavy_chain_mask
+    if AntibodyRegion.CDR3_H in regions:
+        result[AntibodyRegion.CDR3_H] = cdr3_mask & heavy_chain_mask
+    if AntibodyRegion.CDR1_L in regions:
+        result[AntibodyRegion.CDR1_L] = cdr1_mask & light_chain_mask
+    if AntibodyRegion.CDR2_L in regions:
+        result[AntibodyRegion.CDR2_L] = cdr2_mask & light_chain_mask
+    if AntibodyRegion.CDR3_L in regions:
+        result[AntibodyRegion.CDR3_L] = cdr3_mask & light_chain_mask
 
-        # Process heavy chain
-        if len(heavy_positions) > 0:
-            heavy_start = heavy_positions[0].item()
-            heavy_end = heavy_positions[-1].item() + 1
+    # Infer framework regions from CDR boundaries (requires per-sequence processing)
+    needs_fw = any(r in regions for r in FW_REGIONS)
+    if needs_fw:
+        for b in range(batch_size):
+            seq_cdr_mask = cdr_mask[b]
+            seq_chain_ids = chain_ids[b]
+            seq_attention = attention_mask[b].bool()
+            seq_special = special_tokens_mask[b] if special_tokens_mask is not None else None
 
-            # Find CDR regions in heavy chain
-            heavy_cdr_regions = _find_contiguous_regions(seq_cdr_mask, heavy_chain_mask)
+            # Create per-sequence chain masks
+            seq_heavy_mask = (seq_chain_ids == 0) & seq_attention
+            seq_light_mask = (seq_chain_ids == 1) & seq_attention
+            if seq_special is not None:
+                seq_heavy_mask = seq_heavy_mask & ~seq_special.bool()
+                seq_light_mask = seq_light_mask & ~seq_special.bool()
 
-            # Assign CDR masks
-            cdr_names = [AntibodyRegion.CDR1_H, AntibodyRegion.CDR2_H, AntibodyRegion.CDR3_H]
-            for i, (start, end) in enumerate(heavy_cdr_regions[:3]):
-                if cdr_names[i] in regions:
-                    result[cdr_names[i]][b, start:end] = True
+            # Process heavy chain frameworks
+            heavy_positions = seq_heavy_mask.nonzero(as_tuple=True)[0]
+            if len(heavy_positions) > 0:
+                heavy_start = heavy_positions[0].item()
+                heavy_end = heavy_positions[-1].item() + 1
 
-            # Infer framework regions
-            if len(heavy_cdr_regions) == 3:
-                fw_regions = _infer_framework_regions(
-                    heavy_cdr_regions, heavy_start, heavy_end, seq_special
+                # Get CDR boundaries from detailed mask
+                heavy_cdr_regions = _extract_cdr_boundaries(
+                    seq_cdr_mask, seq_heavy_mask
                 )
-                fw_names = [
-                    AntibodyRegion.FW1_H,
-                    AntibodyRegion.FW2_H,
-                    AntibodyRegion.FW3_H,
-                    AntibodyRegion.FW4_H,
-                ]
-                for i, (start, end) in enumerate(fw_regions):
-                    if fw_names[i] in regions and end > start:
-                        result[fw_names[i]][b, start:end] = True
+                if len(heavy_cdr_regions) == 3:
+                    fw_regions = _infer_framework_regions(
+                        heavy_cdr_regions, heavy_start, heavy_end, seq_special
+                    )
+                    fw_names = [
+                        AntibodyRegion.FW1_H,
+                        AntibodyRegion.FW2_H,
+                        AntibodyRegion.FW3_H,
+                        AntibodyRegion.FW4_H,
+                    ]
+                    for i, (start, end) in enumerate(fw_regions):
+                        if fw_names[i] in regions and end > start:
+                            result[fw_names[i]][b, start:end] = True
 
-        # Process light chain
-        if len(light_positions) > 0:
-            light_start = light_positions[0].item()
-            light_end = light_positions[-1].item() + 1
+            # Process light chain frameworks
+            light_positions = seq_light_mask.nonzero(as_tuple=True)[0]
+            if len(light_positions) > 0:
+                light_start = light_positions[0].item()
+                light_end = light_positions[-1].item() + 1
 
-            # Find CDR regions in light chain
-            light_cdr_regions = _find_contiguous_regions(seq_cdr_mask, light_chain_mask)
-
-            # Assign CDR masks
-            cdr_names = [AntibodyRegion.CDR1_L, AntibodyRegion.CDR2_L, AntibodyRegion.CDR3_L]
-            for i, (start, end) in enumerate(light_cdr_regions[:3]):
-                if cdr_names[i] in regions:
-                    result[cdr_names[i]][b, start:end] = True
-
-            # Infer framework regions
-            if len(light_cdr_regions) == 3:
-                fw_regions = _infer_framework_regions(
-                    light_cdr_regions, light_start, light_end, seq_special
+                # Get CDR boundaries from detailed mask
+                light_cdr_regions = _extract_cdr_boundaries(
+                    seq_cdr_mask, seq_light_mask
                 )
-                fw_names = [
-                    AntibodyRegion.FW1_L,
-                    AntibodyRegion.FW2_L,
-                    AntibodyRegion.FW3_L,
-                    AntibodyRegion.FW4_L,
-                ]
-                for i, (start, end) in enumerate(fw_regions):
-                    if fw_names[i] in regions and end > start:
-                        result[fw_names[i]][b, start:end] = True
+                if len(light_cdr_regions) == 3:
+                    fw_regions = _infer_framework_regions(
+                        light_cdr_regions, light_start, light_end, seq_special
+                    )
+                    fw_names = [
+                        AntibodyRegion.FW1_L,
+                        AntibodyRegion.FW2_L,
+                        AntibodyRegion.FW3_L,
+                        AntibodyRegion.FW4_L,
+                    ]
+                    for i, (start, end) in enumerate(fw_regions):
+                        if fw_names[i] in regions and end > start:
+                            result[fw_names[i]][b, start:end] = True
 
     return result
 

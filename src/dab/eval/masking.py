@@ -33,8 +33,10 @@ class EvalMasker:
         Target mask rate for static schedule (0.0-1.0).
     num_timesteps
         Number of timesteps for diffusion schedules.
-    weight_multiplier
-        Weight multiplier for information-weighted masking.
+    cdr_weight_multiplier
+        Weight multiplier for CDR positions in information-weighted masking.
+    nongermline_weight_multiplier
+        Weight multiplier for nongermline positions in information-weighted masking.
     seed
         Random seed for reproducibility.
     """
@@ -45,14 +47,16 @@ class EvalMasker:
         schedule_type: str = "static",
         mask_rate: float = 0.15,
         num_timesteps: int = 100,
-        weight_multiplier: float = 1.0,
+        cdr_weight_multiplier: float = 1.0,
+        nongermline_weight_multiplier: float = 1.0,
         seed: int = 42,
     ) -> None:
         self.masker_type = masker_type
         self.schedule_type = schedule_type
         self.mask_rate = mask_rate
         self.num_timesteps = num_timesteps
-        self.weight_multiplier = weight_multiplier
+        self.cdr_weight_multiplier = cdr_weight_multiplier
+        self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.seed = seed
 
         # Create noise schedule
@@ -71,7 +75,8 @@ class EvalMasker:
         elif masker_type == "information_weighted":
             self._masker = InformationWeightedMasker(
                 noise_schedule=self.noise_schedule,
-                weight_multiplier=weight_multiplier,
+                cdr_weight_multiplier=cdr_weight_multiplier,
+                nongermline_weight_multiplier=nongermline_weight_multiplier,
                 mask_token_id=tokenizer.mask_token_id,
             )
         else:
@@ -297,7 +302,8 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
         - schedule: "static", "cosine", "linear", "sqrt"
         - mask_rate: float (for static schedule)
         - num_timesteps: int
-        - weight_multiplier: float (for information_weighted)
+        - cdr_weight_multiplier: float (for information_weighted)
+        - nongermline_weight_multiplier: float (for information_weighted)
         - seed: int
 
     Returns
@@ -310,6 +316,7 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
         schedule_type=cfg.get("schedule", "static"),
         mask_rate=cfg.get("mask_rate", 0.15),
         num_timesteps=cfg.get("num_timesteps", 100),
-        weight_multiplier=cfg.get("weight_multiplier", 1.0),
+        cdr_weight_multiplier=cfg.get("cdr_weight_multiplier", 1.0),
+        nongermline_weight_multiplier=cfg.get("nongermline_weight_multiplier", 1.0),
         seed=cfg.get("seed", 42),
     )

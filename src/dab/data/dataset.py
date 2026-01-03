@@ -256,19 +256,46 @@ class AntibodyDataset(Dataset):
         )
 
     def _load_data(self) -> pd.DataFrame:
+        """Load data from file, ensuring mask columns are read as strings.
+
+        For CSV/TSV files, mask columns are explicitly read as strings to prevent
+        pandas from interpreting pure-digit strings as integers (e.g., "00011" -> 11).
+        """
         if self.data_path.suffix == ".parquet":
             return pd.read_parquet(self.data_path)
         elif self.data_path.suffix in [".csv", ".tsv"]:
             sep = "\t" if self.data_path.suffix == ".tsv" else ","
-            return pd.read_csv(self.data_path, sep=sep)
+            # Force string dtype for mask columns to preserve leading zeros
+            dtype_overrides = {
+                self.heavy_cdr_col: str,
+                self.light_cdr_col: str,
+                self.heavy_nt_col: str,
+                self.light_nt_col: str,
+            }
+            return pd.read_csv(self.data_path, sep=sep, dtype=dtype_overrides)
         else:
             raise ValueError(f"Unsupported file format: {self.data_path.suffix}")
 
     def _parse_mask(self, mask_str: str) -> list[int] | None:
+        """Parse mask string into list of integers.
+
+        Expects a string of contiguous digits without delimiters.
+        Examples:
+            - CDR mask: "000011110000022200003333" (0=FW, 1=CDR1, 2=CDR2, 3=CDR3)
+            - NT mask: "0000100110000001" (0=germline, 1=non-germline)
+
+        Args:
+            mask_str: String of digit characters (no delimiters).
+
+        Returns:
+            List of integers, one per position, or None if input is NaN/empty.
+        """
         if pd.isna(mask_str):
             return None
         if isinstance(mask_str, str):
-            return [int(x) for x in mask_str.split(",")]
+            if not mask_str:  # Empty string
+                return None
+            return [int(c) for c in mask_str]
         return list(mask_str)
 
     def _parse_coords(self, coords_data: Any) -> np.ndarray | None:

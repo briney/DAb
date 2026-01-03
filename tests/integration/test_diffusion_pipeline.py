@@ -114,7 +114,9 @@ class TestDiffusionTrainingStep:
         # (very low timesteps → near-zero mask rate → no masked tokens → zero loss)
         torch.manual_seed(42)
 
-        masker = InformationWeightedMasker(noise_schedule, weight_multiplier=2.0)
+        masker = InformationWeightedMasker(
+            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=1.0
+        )
 
         batch_size = sample_batch["token_ids"].shape[0]
         timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")

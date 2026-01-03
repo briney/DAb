@@ -98,11 +98,13 @@ class TestAntibodyDataset:
 
     @pytest.fixture
     def sample_csv_with_masks(self, tmp_path):
+        """Sample CSV with detailed CDR masks (0=FW, 1=CDR1, 2=CDR2, 3=CDR3)."""
         data = {
             "heavy_chain": ["EVQLVESGGGLVQPGGSLRL", "QVQLQQSGAELARPGASVKM"],
             "light_chain": ["DIQMTQSPSSLSASVGDRVT", "DIVMTQSPDSLAVSLGERAT"],
-            "heavy_cdr_mask": ["0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0", "0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0"],
-            "light_cdr_mask": ["0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0"],
+            # Detailed CDR mask format: 0=FW, 1=CDR1, 2=CDR2, 3=CDR3
+            "heavy_cdr_mask": ["00011100002220003330", "00001110002220003330"],
+            "light_cdr_mask": ["00000111002220003330", "00000011100222000333"],
         }
         df = pd.DataFrame(data)
         path = tmp_path / "test_data_masks.csv"
@@ -130,6 +132,40 @@ class TestAntibodyDataset:
         assert "light_cdr_mask" in item
         assert item["heavy_cdr_mask"] is not None
         assert len(item["heavy_cdr_mask"]) == 20
+
+    def test_detailed_cdr_mask_values(self, sample_csv_with_masks):
+        """Test that detailed CDR mask values (0,1,2,3) are preserved."""
+        dataset = AntibodyDataset(sample_csv_with_masks)
+        item = dataset[0]
+
+        mask = item["heavy_cdr_mask"]
+        # Should contain values 0, 1, 2, 3 for FW, CDR1, CDR2, CDR3
+        assert 0 in mask  # Framework
+        assert 1 in mask  # CDR1
+        assert 2 in mask  # CDR2
+        assert 3 in mask  # CDR3
+        assert max(mask) == 3
+        assert min(mask) == 0
+
+    def test_csv_mask_dtype_preserved(self, tmp_path):
+        """Test that mask columns with leading zeros are read correctly."""
+        data = {
+            "heavy_chain": ["EVQLVE"],
+            "light_chain": ["DIQMTQ"],
+            # Leading zeros should be preserved (not read as int)
+            "heavy_cdr_mask": ["001111"],
+            "light_cdr_mask": ["001111"],
+        }
+        df = pd.DataFrame(data)
+        path = tmp_path / "test_dtype.csv"
+        df.to_csv(path, index=False)
+
+        dataset = AntibodyDataset(path)
+        item = dataset[0]
+
+        # Should have 6 values, not 4 (if it was misread as int 1111)
+        assert len(item["heavy_cdr_mask"]) == 6
+        assert item["heavy_cdr_mask"] == [0, 0, 1, 1, 1, 1]
 
     def test_missing_columns(self, tmp_path):
         data = {"wrong_col": ["EVQL"]}

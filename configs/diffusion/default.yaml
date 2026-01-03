@@ -1,6 +1,10 @@
 # static schedule type is equivalent to standard MLM training (no masked diffusion)
 schedule_type: cosine  # cosine, linear, sqrt, static
 num_timesteps: 100
-weight_multiplier: 1.0
+
+# Weight multipliers for information-weighted masking
+# Higher values increase the probability of masking those positions
+cdr_weight_multiplier: 1.0         # Weight boost for CDR positions
+nongermline_weight_multiplier: 1.0  # Weight boost for nongermline positions
 
 mask_rate: 0.15  # only used when schedule_type=static

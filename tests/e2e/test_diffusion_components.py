@@ -281,7 +281,9 @@ class TestMaskerTypes:
 
         optimizer = create_optimizer(model, lr=1e-3)
         noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = InformationWeightedMasker(noise_schedule, weight_multiplier=1.0)
+        masker = InformationWeightedMasker(
+            noise_schedule, cdr_weight_multiplier=1.0, nongermline_weight_multiplier=1.0
+        )
 
         losses = []
         for epoch in range(3):
@@ -340,7 +342,9 @@ class TestMaskerTypes:
         batch_size, seq_len = batch["token_ids"].shape
 
         noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = InformationWeightedMasker(noise_schedule, weight_multiplier=2.0)
+        masker = InformationWeightedMasker(
+            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=1.0
+        )
 
         # Create a CDR mask marking positions 10-20 as CDR
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
@@ -395,7 +399,9 @@ class TestMaskerTypes:
 
         noise_schedule = create_schedule("cosine", num_timesteps=50)
         uniform_masker = UniformMasker(noise_schedule)
-        weighted_masker = InformationWeightedMasker(noise_schedule, weight_multiplier=2.0)
+        weighted_masker = InformationWeightedMasker(
+            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=2.0
+        )
 
         # Create CDR and non-templated masks
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)

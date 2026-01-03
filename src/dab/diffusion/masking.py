@@ -13,18 +13,23 @@ class InformationWeightedMasker:
     """
     Applies masking with preference for high-information positions.
 
-    Weights: Non-templated CDR = 2, Templated CDR or Non-templated non-CDR = 1, Templated non-CDR = 0
-    With multiplier=1.0: Non-templated CDR ~3x more likely than templated non-CDR.
+    CDR and nongermline positions receive higher masking weights, controlled by
+    separate multipliers. With default multipliers (1.0 each):
+    - Non-templated CDR positions: 3x base weight (1 + 1 + 1)
+    - Templated CDR or non-templated non-CDR: 2x base weight
+    - Templated non-CDR (framework): 1x base weight
     """
 
     def __init__(
         self,
         noise_schedule: NoiseSchedule,
-        weight_multiplier: float = 1.0,
+        cdr_weight_multiplier: float = 1.0,
+        nongermline_weight_multiplier: float = 1.0,
         mask_token_id: int = tokenizer.mask_token_id,
     ) -> None:
         self.noise_schedule = noise_schedule
-        self.weight_multiplier = weight_multiplier
+        self.cdr_weight_multiplier = cdr_weight_multiplier
+        self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.mask_token_id = mask_token_id
 
     def compute_weights(
@@ -39,10 +44,12 @@ class InformationWeightedMasker:
         weights = torch.ones(batch_size, seq_len, device=device)
 
         if cdr_mask is not None:
-            weights = weights + cdr_mask.float() * self.weight_multiplier
+            # Convert detailed CDR mask (0=FW, 1=CDR1, 2=CDR2, 3=CDR3) to binary
+            cdr_binary = (cdr_mask > 0).float()
+            weights = weights + cdr_binary * self.cdr_weight_multiplier
 
         if non_templated_mask is not None:
-            weights = weights + non_templated_mask.float() * self.weight_multiplier
+            weights = weights + non_templated_mask.float() * self.nongermline_weight_multiplier
 
         weights = weights * attention_mask.float()
         weights_sum = weights.sum(dim=-1, keepdim=True).clamp(min=1e-8)

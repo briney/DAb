@@ -51,7 +51,8 @@ class TrainingConfig:
     # Diffusion
     noise_schedule: str = "cosine"
     num_timesteps: int = 100
-    weight_multiplier: float = 1.0
+    cdr_weight_multiplier: float = 1.0
+    nongermline_weight_multiplier: float = 1.0
 
     # Intervals (in steps)
     log_steps: int = 10
@@ -140,7 +141,11 @@ class Trainer:
 
             noise_schedule = create_schedule(config.noise_schedule, config.num_timesteps)
 
-        self.masker = InformationWeightedMasker(noise_schedule, config.weight_multiplier)
+        self.masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=config.cdr_weight_multiplier,
+            nongermline_weight_multiplier=config.nongermline_weight_multiplier,
+        )
         self.uniform_masker = UniformMasker(noise_schedule)
 
         checkpoint_config = CheckpointConfig(

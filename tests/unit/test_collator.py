@@ -104,13 +104,15 @@ class TestAntibodyCollator:
         assert result["token_ids"].shape[1] == 100
 
     def test_with_cdr_masks(self):
+        """Test collation with detailed CDR masks (0=FW, 1=CDR1, 2=CDR2, 3=CDR3)."""
         collator = AntibodyCollator(max_length=64)
         batch = [
             {
                 "heavy_chain": "EVQLVE",
                 "light_chain": "DIQMTQ",
-                "heavy_cdr_mask": [0, 0, 1, 1, 0, 0],
-                "light_cdr_mask": [0, 1, 1, 0, 0, 0],
+                # Detailed CDR mask: 0=FW, 1=CDR1, 2=CDR2, 3=CDR3
+                "heavy_cdr_mask": [0, 0, 1, 1, 2, 2],
+                "light_cdr_mask": [0, 3, 3, 0, 0, 0],
                 "heavy_non_templated_mask": None,
                 "light_non_templated_mask": None,
             }
@@ -119,6 +121,11 @@ class TestAntibodyCollator:
         result = collator(batch)
         assert result["cdr_mask"] is not None
         assert result["cdr_mask"].shape == result["token_ids"].shape
+        # Detailed values should be preserved
+        cdr_values = result["cdr_mask"][0].tolist()
+        assert 1 in cdr_values  # CDR1
+        assert 2 in cdr_values  # CDR2
+        assert 3 in cdr_values  # CDR3
 
     def test_truncation(self):
         collator = AntibodyCollator(max_length=20)

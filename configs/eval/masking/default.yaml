@@ -19,10 +19,11 @@ mask_rate: 0.15
 # Only used when schedule != static
 num_timesteps: 100
 
-# Weight multiplier for information-weighted masking
+# Weight multipliers for information-weighted masking
 # Only used when type=information_weighted
-# Higher values = stronger preference for CDR/non-templated positions
-weight_multiplier: 1.0
+# Higher values = stronger preference for masking those positions
+cdr_weight_multiplier: 1.0         # Weight boost for CDR positions
+nongermline_weight_multiplier: 1.0  # Weight boost for nongermline positions
 
 # Random seed for reproducible masking
 # Same seed + same data = same masked positions

@@ -54,26 +54,28 @@ class TestExtractRegionMasks:
 
     @pytest.fixture
     def sample_batch(self):
-        """Create a sample batch with CDR and chain annotations.
+        """Create a sample batch with detailed CDR annotations.
+
+        Uses detailed CDR mask format: 0=FW, 1=CDR1, 2=CDR2, 3=CDR3
 
         Sequence structure (length 40):
         - Position 0: CLS (special)
         - Positions 1-19: Heavy chain
-            - 1-3: FW1_H
-            - 4-6: CDR1_H
-            - 7-9: FW2_H
-            - 10-12: CDR2_H
-            - 13-15: FW3_H
-            - 16-18: CDR3_H
-            - 19: FW4_H
+            - 1-3: FW1_H (mask=0)
+            - 4-6: CDR1_H (mask=1)
+            - 7-9: FW2_H (mask=0)
+            - 10-12: CDR2_H (mask=2)
+            - 13-15: FW3_H (mask=0)
+            - 16-18: CDR3_H (mask=3)
+            - 19: FW4_H (mask=0)
         - Positions 20-38: Light chain
-            - 20-22: FW1_L
-            - 23-25: CDR1_L
-            - 26-28: FW2_L
-            - 29-31: CDR2_L
-            - 32-34: FW3_L
-            - 35-37: CDR3_L
-            - 38: FW4_L
+            - 20-22: FW1_L (mask=0)
+            - 23-25: CDR1_L (mask=1)
+            - 26-28: FW2_L (mask=0)
+            - 29-31: CDR2_L (mask=2)
+            - 32-34: FW3_L (mask=0)
+            - 35-37: CDR3_L (mask=3)
+            - 38: FW4_L (mask=0)
         - Position 39: EOS (special)
         """
         batch_size = 2
@@ -94,16 +96,16 @@ class TestExtractRegionMasks:
         chain_ids = torch.zeros(batch_size, seq_len, dtype=torch.long)
         chain_ids[:, 20:] = 1
 
-        # CDR mask: mark CDR positions as 1
+        # Detailed CDR mask: 0=FW, 1=CDR1, 2=CDR2, 3=CDR3
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
         # Heavy chain CDRs
-        cdr_mask[:, 4:7] = 1   # CDR1_H (positions 4-6)
-        cdr_mask[:, 10:13] = 1  # CDR2_H (positions 10-12)
-        cdr_mask[:, 16:19] = 1  # CDR3_H (positions 16-18)
+        cdr_mask[:, 4:7] = 1    # CDR1_H (positions 4-6)
+        cdr_mask[:, 10:13] = 2  # CDR2_H (positions 10-12)
+        cdr_mask[:, 16:19] = 3  # CDR3_H (positions 16-18)
         # Light chain CDRs
         cdr_mask[:, 23:26] = 1  # CDR1_L (positions 23-25)
-        cdr_mask[:, 29:32] = 1  # CDR2_L (positions 29-31)
-        cdr_mask[:, 35:38] = 1  # CDR3_L (positions 35-37)
+        cdr_mask[:, 29:32] = 2  # CDR2_L (positions 29-31)
+        cdr_mask[:, 35:38] = 3  # CDR3_L (positions 35-37)
 
         return {
             "token_ids": token_ids,
@@ -137,18 +139,41 @@ class TestExtractRegionMasks:
         assert AntibodyRegion.CDR3_L in region_masks
 
     def test_cdr_positions_correct(self, sample_batch):
-        """Test that CDR positions are correctly identified."""
+        """Test that CDR positions are correctly identified using detailed mask values."""
         region_masks = extract_region_masks(sample_batch)
 
-        # CDR1_H: positions 4-6
+        # CDR1_H: positions 4-6 (mask value = 1)
         cdr1_h = region_masks[AntibodyRegion.CDR1_H][0]
         assert cdr1_h[4:7].all()
         assert cdr1_h.sum() == 3
 
-        # CDR3_L: positions 35-37
+        # CDR2_H: positions 10-12 (mask value = 2)
+        cdr2_h = region_masks[AntibodyRegion.CDR2_H][0]
+        assert cdr2_h[10:13].all()
+        assert cdr2_h.sum() == 3
+
+        # CDR3_H: positions 16-18 (mask value = 3)
+        cdr3_h = region_masks[AntibodyRegion.CDR3_H][0]
+        assert cdr3_h[16:19].all()
+        assert cdr3_h.sum() == 3
+
+        # CDR3_L: positions 35-37 (mask value = 3)
         cdr3_l = region_masks[AntibodyRegion.CDR3_L][0]
         assert cdr3_l[35:38].all()
         assert cdr3_l.sum() == 3
+
+    def test_cdrs_non_overlapping(self, sample_batch):
+        """Test that CDR regions identified by different mask values don't overlap."""
+        region_masks = extract_region_masks(sample_batch)
+
+        cdr1_h = region_masks[AntibodyRegion.CDR1_H][0]
+        cdr2_h = region_masks[AntibodyRegion.CDR2_H][0]
+        cdr3_h = region_masks[AntibodyRegion.CDR3_H][0]
+
+        # No overlap between CDR regions
+        assert not (cdr1_h & cdr2_h).any()
+        assert not (cdr2_h & cdr3_h).any()
+        assert not (cdr1_h & cdr3_h).any()
 
     def test_framework_positions_correct(self, sample_batch):
         """Test that framework positions are correctly inferred."""

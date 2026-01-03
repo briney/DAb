@@ -68,11 +68,13 @@ class TestEvalMasker:
             masker_type="information_weighted",
             schedule_type="static",
             mask_rate=0.15,
-            weight_multiplier=1.5,
+            cdr_weight_multiplier=1.5,
+            nongermline_weight_multiplier=2.0,
             seed=42,
         )
         assert masker.masker_type == "information_weighted"
-        assert masker.weight_multiplier == 1.5
+        assert masker.cdr_weight_multiplier == 1.5
+        assert masker.nongermline_weight_multiplier == 2.0
 
     def test_reproducibility_with_seed(self, sample_batch):
         """Test that same seed produces same masks."""
@@ -178,7 +180,8 @@ class TestEvalMasker:
             masker_type="information_weighted",
             schedule_type="static",
             mask_rate=0.2,
-            weight_multiplier=2.0,  # Strong bias
+            cdr_weight_multiplier=2.0,  # Strong CDR bias
+            nongermline_weight_multiplier=1.0,
             seed=42,
         )
 
