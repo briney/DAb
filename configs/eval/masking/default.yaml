@@ -1,0 +1,29 @@
+# Evaluation masking configuration
+# Controls how sequences are masked during evaluation for reproducible comparisons
+
+# Masker type: "uniform" or "information_weighted"
+# - uniform: Random masking with equal probability for all valid positions
+# - information_weighted: Biased toward CDR and non-templated regions
+type: uniform
+
+# Schedule type: "static", "cosine", "linear", "sqrt"
+# - static: Fixed mask rate (ignores timesteps), like traditional MLM
+# - cosine/linear/sqrt: Dynamic mask rate based on sampled timesteps
+schedule: static
+
+# Mask rate (0.0-1.0)
+# Used when schedule=static; for dynamic schedules, timesteps determine rate
+mask_rate: 0.15
+
+# Number of timesteps for diffusion schedules
+# Only used when schedule != static
+num_timesteps: 100
+
+# Weight multiplier for information-weighted masking
+# Only used when type=information_weighted
+# Higher values = stronger preference for CDR/non-templated positions
+weight_multiplier: 1.0
+
+# Random seed for reproducible masking
+# Same seed + same data = same masked positions
+seed: 42

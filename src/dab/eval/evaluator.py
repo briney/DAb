@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .base import Metric
+from .masking import EvalMasker, create_eval_masker
 from .registry import build_metrics
 
 if TYPE_CHECKING:
@@ -75,6 +76,26 @@ class Evaluator:
 
         # Cache for whether attention weights are needed per eval dataset
         self._needs_attentions_cache: dict[str, bool] = {}
+
+        # Initialize evaluation masker from config (if configured)
+        self.eval_masker = self._build_eval_masker()
+
+    def _build_eval_masker(self) -> EvalMasker | None:
+        """Build evaluation masker from config if configured.
+
+        Returns
+        -------
+        EvalMasker or None
+            Configured EvalMasker if eval.masking is present in config,
+            None otherwise.
+        """
+        eval_cfg = self.cfg.get("eval", {})
+        masking_cfg = eval_cfg.get("masking", {})
+
+        if not masking_cfg:
+            return None
+
+        return create_eval_masker(masking_cfg)
 
     def _get_metrics(self, eval_name: str) -> list[Metric]:
         """Get or build metrics for an evaluation dataset.
@@ -150,11 +171,16 @@ class Evaluator:
     ) -> dict[str, float]:
         """Run evaluation on a dataset.
 
+        Masking priority:
+        1. Use self.eval_masker if configured (controlled, reproducible eval)
+        2. Use passed masker parameter (legacy behavior)
+        3. Fall back to _create_eval_mask (15% random masking)
+
         Args:
             eval_loader: DataLoader for the evaluation dataset.
             eval_name: Name of the evaluation dataset.
             masker: Optional masker for creating mask labels.
-                If None, uniform random masking is used.
+                Ignored if self.eval_masker is configured.
 
         Returns:
             Dictionary mapping metric names to values.
@@ -177,6 +203,11 @@ class Evaluator:
         # Determine if we should show progress bar
         show_progress = self.accelerator is None or self.accelerator.is_local_main_process
 
+        # Get seeded generator for reproducible masking (if using eval_masker)
+        generator = None
+        if self.eval_masker is not None:
+            generator = self.eval_masker.get_generator(device)
+
         with torch.no_grad():
             for batch in tqdm(eval_loader, desc=f"Eval ({eval_name})", disable=not show_progress):
                 # Move batch to device if not using accelerator
@@ -187,8 +218,15 @@ class Evaluator:
                     }
 
                 # Create mask labels for evaluation
-                # For eval, we use a simple random mask if no masker is provided
-                if masker is not None:
+                # Priority: 1) eval_masker (controlled), 2) passed masker, 3) fallback
+                if self.eval_masker is not None:
+                    # Use configured eval masker with seeded generator
+                    masked_ids, mask_labels = self.eval_masker.apply_mask(
+                        batch=batch,
+                        generator=generator,
+                    )
+                elif masker is not None:
+                    # Legacy: use passed masker
                     batch_size = batch["token_ids"].shape[0]
                     timesteps = masker.noise_schedule.sample_timesteps(batch_size, device)
                     masked_ids, mask_labels = masker.apply_mask(

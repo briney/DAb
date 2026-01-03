@@ -1,0 +1,30 @@
+# Region-specific evaluation configuration
+# Enables detailed analysis of model performance across antibody regions
+
+# Enable region-specific evaluation
+enabled: false
+
+# Evaluation mode:
+# - "per_position": Mask one position at a time, aggregate by region (most detailed)
+# - "region_level": Mask entire regions at once (faster, tests region reconstruction)
+mode: per_position
+
+# Regions to include in evaluation
+# null = all regions, or specify a list:
+# ["cdr1_h", "cdr2_h", "cdr3_h", "cdr1_l", "cdr2_l", "cdr3_l",
+#  "fw1_h", "fw2_h", "fw3_h", "fw4_h", "fw1_l", "fw2_l", "fw3_l", "fw4_l"]
+include: null
+
+# Batch size for per-position evaluation
+# Higher values = faster but more memory
+position_batch_size: 32
+
+# Aggregation strategies for results
+# - "all": Individual regions (cdr1_h_acc, cdr2_h_acc, ...)
+# - "cdr": CDRs vs frameworks (cdr_acc, fw_acc)
+# - "fw": Same as "cdr" (alias)
+# - "chain": Heavy vs light (heavy_acc, light_acc)
+# - "region_type": By CDR/FW number across chains (cdr1_acc, cdr2_acc, cdr3_acc, fw1_acc, ...)
+aggregate:
+  - all
+  - cdr

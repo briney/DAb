@@ -8,6 +8,8 @@ metrics during training. It supports:
 - Distributed training aggregation
 - Metrics computed from logits, embeddings, or attention weights
 - Fitting small models (like logistic regression) on representations
+- Controlled evaluation masking for reproducible comparisons
+- Per-region evaluation for antibody analysis
 
 Example usage:
     from dab.eval import Evaluator, build_metrics
@@ -20,10 +22,26 @@ Example usage:
 
     # Or evaluate on all configured datasets
     all_results = evaluator.evaluate_all(eval_loaders)
+
+    # Per-position evaluation
+    from dab.eval import PerPositionEvaluator, AntibodyRegion
+    per_pos = PerPositionEvaluator(model)
+    results = per_pos.evaluate_by_region(sample)
 """
 
 from .base import Metric, MetricBase
 from .evaluator import Evaluator
+from .masking import EvalMasker, create_eval_masker
+from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
+from .regions import (
+    AntibodyRegion,
+    CDR_REGIONS,
+    FW_REGIONS,
+    HEAVY_REGIONS,
+    LIGHT_REGIONS,
+    aggregate_region_masks,
+    extract_region_masks,
+)
 from .registry import build_metrics, get_metric_class, list_metrics, register_metric
 
 __all__ = [
@@ -36,4 +54,18 @@ __all__ = [
     "get_metric_class",
     "list_metrics",
     "build_metrics",
+    # Masking
+    "EvalMasker",
+    "create_eval_masker",
+    # Regions
+    "AntibodyRegion",
+    "CDR_REGIONS",
+    "FW_REGIONS",
+    "HEAVY_REGIONS",
+    "LIGHT_REGIONS",
+    "extract_region_masks",
+    "aggregate_region_masks",
+    # Per-position evaluation
+    "PerPositionEvaluator",
+    "RegionMaskingEvaluator",
 ]
