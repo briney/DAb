@@ -158,7 +158,8 @@ class Trainer:
 
         self.metrics = MetricAccumulator()
         self.global_step = 0
-        self.epoch = 0
+        self.epoch = 0.0
+        self.steps_per_epoch = len(self.train_dataloader)
         self.logger = None
 
     def set_logger(self, logger) -> None:
@@ -338,8 +339,6 @@ class Trainer:
         progress_bar.update(self.global_step)
 
         while self.global_step < total_steps:
-            self.epoch += 1
-
             for batch in self.train_dataloader:
                 with self.accelerator.accumulate(self.model):
                     loss = self.training_step(batch)
@@ -356,6 +355,7 @@ class Trainer:
 
                 if self.accelerator.sync_gradients:
                     self.global_step += 1
+                    self.epoch = self.global_step / self.steps_per_epoch
                     progress_bar.update(1)
 
                     self.metrics.update("train_loss", loss.item())
