@@ -173,19 +173,14 @@ class Trainer:
         """
         self.evaluator = evaluator
 
-    def _apply_masking(
-        self, batch: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def _apply_masking(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply masking to a batch."""
         device = batch["token_ids"].device
         batch_size = batch["token_ids"].shape[0]
 
         timesteps = self.masker.noise_schedule.sample_timesteps(batch_size, device)
 
-        if (
-            batch.get("cdr_mask") is not None
-            or batch.get("non_templated_mask") is not None
-        ):
+        if batch.get("cdr_mask") is not None or batch.get("non_templated_mask") is not None:
             masked_ids, mask_labels = self.masker.apply_mask(
                 token_ids=batch["token_ids"],
                 timesteps=timesteps,
@@ -332,8 +327,7 @@ class Trainer:
         else:
             total_steps = self.config.max_steps
 
-        if self.accelerator.is_main_process:
-            print(f"Starting training for {total_steps} steps...", flush=True)
+        self.accelerator.print(f"Starting training for {total_steps} steps...")
 
         progress_bar = tqdm(
             total=total_steps,
@@ -401,9 +395,7 @@ class Trainer:
                         if self.logger is not None and all_eval_metrics:
                             # Use log_eval_all if available, otherwise flatten and log
                             if hasattr(self.logger, "log_eval_all"):
-                                self.logger.log_eval_all(
-                                    all_eval_metrics, step=self.global_step
-                                )
+                                self.logger.log_eval_all(all_eval_metrics, step=self.global_step)
                             else:
                                 # Flatten metrics for basic logging
                                 flat_metrics = {}

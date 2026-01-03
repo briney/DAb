@@ -85,9 +85,7 @@ def _load_config(
                 config_dir = config_path
                 config_name = "config"
 
-        stack.enter_context(
-            initialize_config_dir(config_dir=str(config_dir), version_base=None)
-        )
+        stack.enter_context(initialize_config_dir(config_dir=str(config_dir), version_base=None))
 
         override_list = overrides or []
         override_list.extend([f"name={name}", f"seed={seed}"])
@@ -164,8 +162,8 @@ def run_training(
     # PHASE 3: Main-process-only I/O
     # ==================================================================
 
+    accelerator.print(OmegaConf.to_yaml(cfg))
     if is_main:
-        print(OmegaConf.to_yaml(cfg), flush=True)
         output_path = Path(cfg.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(cfg, output_path / "config.yaml")
@@ -194,8 +192,7 @@ def run_training(
         embedding_dropout=cfg.model.embedding_dropout,
     )
     model = DAbModel(model_config)
-    if is_main:
-        print(f"Model parameters: {model.get_num_params():,}", flush=True)
+    accelerator.print(f"Model parameters: {model.get_num_params():,}")
 
     # Create train dataloader (handles single or multi-dataset automatically)
     train_loader = create_train_dataloader(
@@ -252,17 +249,15 @@ def run_training(
     )
 
     # Warn if multi-GPU available but not being used
-    if is_main:
-        num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
-        world_size = accelerator.num_processes
-        if world_size == 1 and num_gpus > 1:
-            print(
-                f"WARNING: {num_gpus} GPUs detected but only 1 process active.\n"
-                f"For multi-GPU training, use: accelerate launch -m dab.train ...",
-                flush=True,
-            )
-        elif world_size > 1:
-            print(f"Distributed training with {world_size} processes", flush=True)
+    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    world_size = accelerator.num_processes
+    if world_size == 1 and num_gpus > 1:
+        accelerator.print(
+            f"WARNING: {num_gpus} GPUs detected but only 1 process active.\n"
+            f"For multi-GPU training, use: accelerate launch -m dab.train ..."
+        )
+    elif world_size > 1:
+        accelerator.print(f"Distributed training with {world_size} processes")
 
     # Set up logging (only on main process)
     if use_wandb and cfg.log.wandb.enabled and is_main:
@@ -278,8 +273,7 @@ def run_training(
 
     # Resume if specified
     if resume_from:
-        if is_main:
-            print(f"Resuming from {resume_from}", flush=True)
+        accelerator.print(f"Resuming from {resume_from}")
         trainer.checkpoint_manager.load(resume_from)
 
     # Train
@@ -299,7 +293,9 @@ def main() -> None:
         epilog="Training data must be specified via override: data.train=/path/to/data.csv",
     )
     parser.add_argument(
-        "--config", "-c", default="configs",
+        "--config",
+        "-c",
+        default="configs",
         help="Config file (.yaml) or config directory (default: configs)",
     )
     parser.add_argument("--output-dir", "-o", default="outputs", help="Output directory")
