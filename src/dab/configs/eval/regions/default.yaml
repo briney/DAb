@@ -28,4 +28,3 @@ position_batch_size: 32
 # - "region_type": By CDR/FWR number across chains (cdr1_accuracy, cdr2_accuracy, fwr1_accuracy, ...)
 aggregate:
   - all
-  - cdr
