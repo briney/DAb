@@ -218,8 +218,8 @@ class AntibodyDataset(Dataset):
         light_col: str = "light_chain",
         heavy_cdr_col: str = "heavy_cdr_mask",
         light_cdr_col: str = "light_cdr_mask",
-        heavy_nt_col: str = "heavy_non_templated_mask",
-        light_nt_col: str = "light_non_templated_mask",
+        heavy_nongermline_col: str = "heavy_non_templated_mask",
+        light_nongermline_col: str = "light_non_templated_mask",
         load_coords: bool = False,
         heavy_coords_col: str = "heavy_coords",
         light_coords_col: str = "light_coords",
@@ -231,8 +231,8 @@ class AntibodyDataset(Dataset):
         self.light_col = light_col
         self.heavy_cdr_col = heavy_cdr_col
         self.light_cdr_col = light_cdr_col
-        self.heavy_nt_col = heavy_nt_col
-        self.light_nt_col = light_nt_col
+        self.heavy_nongermline_col = heavy_nongermline_col
+        self.light_nongermline_col = light_nongermline_col
 
         self.load_coords = load_coords
         self.heavy_coords_col = heavy_coords_col
@@ -247,7 +247,7 @@ class AntibodyDataset(Dataset):
             heavy_cdr_col in self.df.columns and light_cdr_col in self.df.columns
         )
         self.has_nt_mask = (
-            heavy_nt_col in self.df.columns and light_nt_col in self.df.columns
+            heavy_nongermline_col in self.df.columns and light_nongermline_col in self.df.columns
         )
         self.has_coords = (
             load_coords
@@ -269,8 +269,8 @@ class AntibodyDataset(Dataset):
             dtype_overrides = {
                 self.heavy_cdr_col: str,
                 self.light_cdr_col: str,
-                self.heavy_nt_col: str,
-                self.light_nt_col: str,
+                self.heavy_nongermline_col: str,
+                self.light_nongermline_col: str,
             }
             return pd.read_csv(self.data_path, sep=sep, dtype=dtype_overrides)
         else:
@@ -358,8 +358,8 @@ class AntibodyDataset(Dataset):
             result["light_cdr_mask"] = None
 
         if self.has_nt_mask:
-            result["heavy_non_templated_mask"] = self._parse_mask(row[self.heavy_nt_col])
-            result["light_non_templated_mask"] = self._parse_mask(row[self.light_nt_col])
+            result["heavy_non_templated_mask"] = self._parse_mask(row[self.heavy_nongermline_col])
+            result["light_non_templated_mask"] = self._parse_mask(row[self.light_nongermline_col])
         else:
             result["heavy_non_templated_mask"] = None
             result["light_non_templated_mask"] = None

@@ -31,8 +31,8 @@ def create_dataloader(
     light_col: str = "light_chain",
     heavy_cdr_col: str = "heavy_cdr_mask",
     light_cdr_col: str = "light_cdr_mask",
-    heavy_nt_col: str = "heavy_non_templated_mask",
-    light_nt_col: str = "light_non_templated_mask",
+    heavy_nongermline_col: str = "heavy_non_templated_mask",
+    light_nongermline_col: str = "light_non_templated_mask",
     heavy_coords_col: str = "heavy_coords",
     light_coords_col: str = "light_coords",
 ) -> DataLoader:
@@ -53,8 +53,8 @@ def create_dataloader(
         light_col: Column name for light chain sequences.
         heavy_cdr_col: Column name for heavy chain CDR mask.
         light_cdr_col: Column name for light chain CDR mask.
-        heavy_nt_col: Column name for heavy chain non-templated mask.
-        light_nt_col: Column name for light chain non-templated mask.
+        heavy_nongermline_col: Column name for heavy chain non-templated mask.
+        light_nongermline_col: Column name for light chain non-templated mask.
         heavy_coords_col: Column name for heavy chain coordinates.
         light_coords_col: Column name for light chain coordinates.
 
@@ -68,8 +68,8 @@ def create_dataloader(
         light_col=light_col,
         heavy_cdr_col=heavy_cdr_col,
         light_cdr_col=light_cdr_col,
-        heavy_nt_col=heavy_nt_col,
-        light_nt_col=light_nt_col,
+        heavy_nongermline_col=heavy_nongermline_col,
+        light_nongermline_col=light_nongermline_col,
         load_coords=load_coords,
         heavy_coords_col=heavy_coords_col,
         light_coords_col=light_coords_col,
@@ -101,8 +101,8 @@ def create_multi_dataloader(
     light_col: str = "light_chain",
     heavy_cdr_col: str = "heavy_cdr_mask",
     light_cdr_col: str = "light_cdr_mask",
-    heavy_nt_col: str = "heavy_non_templated_mask",
-    light_nt_col: str = "light_non_templated_mask",
+    heavy_nongermline_col: str = "heavy_non_templated_mask",
+    light_nongermline_col: str = "light_non_templated_mask",
     heavy_coords_col: str = "heavy_coords",
     light_coords_col: str = "light_coords",
 ) -> DataLoader:
@@ -123,8 +123,8 @@ def create_multi_dataloader(
         light_col: Column name for light chain sequences.
         heavy_cdr_col: Column name for heavy chain CDR mask.
         light_cdr_col: Column name for light chain CDR mask.
-        heavy_nt_col: Column name for heavy chain non-templated mask.
-        light_nt_col: Column name for light chain non-templated mask.
+        heavy_nongermline_col: Column name for heavy chain non-templated mask.
+        light_nongermline_col: Column name for light chain non-templated mask.
         heavy_coords_col: Column name for heavy chain coordinates.
         light_coords_col: Column name for light chain coordinates.
 
@@ -139,8 +139,8 @@ def create_multi_dataloader(
             light_col=light_col,
             heavy_cdr_col=heavy_cdr_col,
             light_cdr_col=light_cdr_col,
-            heavy_nt_col=heavy_nt_col,
-            light_nt_col=light_nt_col,
+            heavy_nongermline_col=heavy_nongermline_col,
+            light_nongermline_col=light_nongermline_col,
             load_coords=load_coords,
             heavy_coords_col=heavy_coords_col,
             light_coords_col=light_coords_col,
@@ -210,8 +210,8 @@ def create_train_dataloader(
         "light_col": cfg.light_col,
         "heavy_cdr_col": cfg.heavy_cdr_col,
         "light_cdr_col": cfg.light_cdr_col,
-        "heavy_nt_col": cfg.heavy_nt_col,
-        "light_nt_col": cfg.light_nt_col,
+        "heavy_nongermline_col": cfg.heavy_nongermline_col,
+        "light_nongermline_col": cfg.light_nongermline_col,
         "heavy_coords_col": cfg.heavy_coords_col,
         "light_coords_col": cfg.light_coords_col,
     }
@@ -346,8 +346,8 @@ def create_eval_dataloaders(
                 light_col=cfg.light_col,
                 heavy_cdr_col=cfg.heavy_cdr_col,
                 light_cdr_col=cfg.light_cdr_col,
-                heavy_nt_col=cfg.heavy_nt_col,
-                light_nt_col=cfg.light_nt_col,
+                heavy_nongermline_col=cfg.heavy_nongermline_col,
+                light_nongermline_col=cfg.light_nongermline_col,
                 heavy_coords_col=cfg.heavy_coords_col,
                 light_coords_col=cfg.light_coords_col,
             )
