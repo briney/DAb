@@ -11,6 +11,8 @@ from tqdm import tqdm
 
 from .base import Metric
 from .masking import EvalMasker, create_eval_masker
+from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
+from .regions import AntibodyRegion
 from .registry import build_metrics
 
 if TYPE_CHECKING:
@@ -269,6 +271,17 @@ class Evaluator:
             except Exception as e:
                 warnings.warn(f"Metric '{metric.name}' compute failed: {e}")
 
+        # Region-based evaluation (if enabled for this dataset)
+        region_cfg = self._get_region_config(eval_name)
+        if region_cfg.get("enabled", False):
+            try:
+                region_results = self._evaluate_regions(eval_loader, eval_name, region_cfg)
+                # Prefix with "region/" and merge into results
+                for key, value in region_results.items():
+                    results[f"region/{key}"] = value
+            except Exception as e:
+                warnings.warn(f"Region evaluation failed: {e}")
+
         self.model.train()
 
         # Clear CUDA cache to prevent memory fragmentation
@@ -309,6 +322,326 @@ class Evaluator:
             mask_labels = mask_labels * (~special_tokens_mask).long()
 
         return mask_labels.to(device)
+
+    def _get_region_config(self, eval_name: str) -> dict[str, Any]:
+        """Get merged region evaluation config for a dataset.
+
+        Merges global eval.regions config with per-dataset overrides.
+
+        Args:
+            eval_name: Name of the evaluation dataset.
+
+        Returns:
+            Merged region configuration dictionary.
+        """
+        # Start with global config
+        eval_cfg = self.cfg.get("eval", {})
+        global_regions = dict(eval_cfg.get("regions", {}))
+
+        # Get per-dataset override if present
+        data_cfg = self.cfg.get("data", {})
+        eval_datasets = data_cfg.get("eval", {})
+
+        if isinstance(eval_datasets, str):
+            # Single eval dataset, no per-dataset config
+            return global_regions
+
+        dataset_cfg = eval_datasets.get(eval_name, {})
+        if isinstance(dataset_cfg, str):
+            # Shorthand path, no per-dataset config
+            return global_regions
+
+        dataset_regions = dict(dataset_cfg.get("regions", {}))
+
+        # Merge: dataset overrides global
+        result = global_regions.copy()
+        result.update(dataset_regions)
+        return result
+
+    def _show_progress(self) -> bool:
+        """Check if progress bars should be shown."""
+        return self.accelerator is None or self.accelerator.is_local_main_process
+
+    def _evaluate_regions(
+        self,
+        eval_loader: DataLoader,
+        eval_name: str,
+        region_cfg: dict[str, Any],
+    ) -> dict[str, float]:
+        """Run region-based evaluation.
+
+        Args:
+            eval_loader: DataLoader for the evaluation dataset.
+            eval_name: Name of the evaluation dataset.
+            region_cfg: Region evaluation configuration.
+
+        Returns:
+            Dictionary mapping region metric names to values.
+        """
+        mode = region_cfg.get("mode", "per_position")
+        include = region_cfg.get("include")  # None = all regions
+        position_batch_size = region_cfg.get("position_batch_size", 32)
+        aggregate_strategies = region_cfg.get("aggregate", ["all"])
+
+        # Parse include list to AntibodyRegion set
+        if include is not None:
+            regions = {AntibodyRegion(r) for r in include}
+        else:
+            regions = None  # All regions
+
+        device = _get_model_device(self.model, self.accelerator)
+
+        if mode == "per_position":
+            return self._run_per_position_eval(
+                eval_loader, regions, position_batch_size, aggregate_strategies
+            )
+        else:  # region_level
+            return self._run_region_level_eval(
+                eval_loader, regions, aggregate_strategies
+            )
+
+    def _run_per_position_eval(
+        self,
+        eval_loader: DataLoader,
+        regions: set[AntibodyRegion] | None,
+        position_batch_size: int,
+        aggregate_strategies: list[str],
+    ) -> dict[str, float]:
+        """Run per-position region evaluation.
+
+        Args:
+            eval_loader: DataLoader for the evaluation dataset.
+            regions: Set of regions to evaluate, or None for all.
+            position_batch_size: Batch size for per-position evaluation.
+            aggregate_strategies: List of aggregation strategies.
+
+        Returns:
+            Dictionary mapping region metric names to values.
+        """
+        device = _get_model_device(self.model, self.accelerator)
+        evaluator = PerPositionEvaluator(
+            model=self.model,
+            position_batch_size=position_batch_size,
+            device=device,
+            show_progress=self._show_progress(),
+        )
+
+        # Accumulate results across all samples
+        region_accumulators: dict[str, dict[str, float]] = {}
+
+        self.model.eval()
+        with torch.no_grad():
+            for batch in tqdm(
+                eval_loader,
+                desc="Region eval",
+                disable=not self._show_progress()
+            ):
+                # Process each sample in the batch individually
+                batch_size = batch["token_ids"].shape[0]
+                for i in range(batch_size):
+                    # Extract single sample
+                    sample = {
+                        k: v[i] if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()
+                    }
+
+                    # Evaluate by region
+                    try:
+                        sample_results = evaluator.evaluate_by_region(sample, regions)
+                    except Exception as e:
+                        warnings.warn(f"Region evaluation failed for sample: {e}")
+                        continue
+
+                    # Accumulate results
+                    for region_name, metrics in sample_results.items():
+                        if region_name not in region_accumulators:
+                            region_accumulators[region_name] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        acc = region_accumulators[region_name]
+                        count = metrics.get("count", 0)
+                        if count > 0:
+                            acc["correct"] += metrics["accuracy"] * count
+                            acc["total_loss"] += metrics["avg_loss"] * count
+                            acc["total_prob"] += metrics["avg_prob"] * count
+                            acc["count"] += count
+
+        # Compute final metrics
+        results: dict[str, float] = {}
+        for region_name, acc in region_accumulators.items():
+            if acc["count"] > 0:
+                results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
+                results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
+                results[f"{region_name}_prob"] = acc["total_prob"] / acc["count"]
+
+        # Apply aggregation strategies
+        results.update(self._aggregate_region_results(region_accumulators, aggregate_strategies))
+
+        return results
+
+    def _run_region_level_eval(
+        self,
+        eval_loader: DataLoader,
+        regions: set[AntibodyRegion] | None,
+        aggregate_strategies: list[str],
+    ) -> dict[str, float]:
+        """Run region-level (full region masking) evaluation.
+
+        Args:
+            eval_loader: DataLoader for the evaluation dataset.
+            regions: Set of regions to evaluate, or None for all.
+            aggregate_strategies: List of aggregation strategies.
+
+        Returns:
+            Dictionary mapping region metric names to values.
+        """
+        device = _get_model_device(self.model, self.accelerator)
+        evaluator = RegionMaskingEvaluator(model=self.model, device=device)
+
+        # Accumulate results across all samples
+        region_accumulators: dict[str, dict[str, float]] = {}
+
+        self.model.eval()
+        with torch.no_grad():
+            for batch in tqdm(
+                eval_loader,
+                desc="Region eval",
+                disable=not self._show_progress()
+            ):
+                # Process each sample in the batch individually
+                batch_size = batch["token_ids"].shape[0]
+                for i in range(batch_size):
+                    # Extract single sample
+                    sample = {
+                        k: v[i] if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()
+                    }
+
+                    # Evaluate all regions
+                    try:
+                        sample_results = evaluator.evaluate_all_regions(sample, regions)
+                    except Exception as e:
+                        warnings.warn(f"Region evaluation failed for sample: {e}")
+                        continue
+
+                    # Accumulate results
+                    for region_name, metrics in sample_results.items():
+                        if region_name not in region_accumulators:
+                            region_accumulators[region_name] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        acc = region_accumulators[region_name]
+                        count = metrics.get("count", 0)
+                        if count > 0:
+                            acc["correct"] += metrics["accuracy"] * count
+                            acc["total_loss"] += metrics["avg_loss"] * count
+                            acc["total_prob"] += metrics["avg_prob"] * count
+                            acc["count"] += count
+
+        # Compute final metrics
+        results: dict[str, float] = {}
+        for region_name, acc in region_accumulators.items():
+            if acc["count"] > 0:
+                results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
+                results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
+                results[f"{region_name}_prob"] = acc["total_prob"] / acc["count"]
+
+        # Apply aggregation strategies
+        results.update(self._aggregate_region_results(region_accumulators, aggregate_strategies))
+
+        return results
+
+    def _aggregate_region_results(
+        self,
+        region_accumulators: dict[str, dict[str, float]],
+        aggregate_strategies: list[str],
+    ) -> dict[str, float]:
+        """Aggregate region results by various strategies.
+
+        Args:
+            region_accumulators: Per-region accumulated metrics.
+            aggregate_strategies: List of aggregation strategies to apply.
+
+        Returns:
+            Aggregated metrics.
+        """
+        results: dict[str, float] = {}
+
+        for strategy in aggregate_strategies:
+            if strategy == "all":
+                # Individual regions already in results, skip
+                continue
+
+            elif strategy in ("cdr", "fwr"):
+                # Aggregate CDRs vs frameworks
+                cdr_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
+                fwr_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
+
+                for region_name, acc in region_accumulators.items():
+                    if "cdr" in region_name:
+                        for k in cdr_acc:
+                            cdr_acc[k] += acc[k]
+                    elif "fwr" in region_name:
+                        for k in fwr_acc:
+                            fwr_acc[k] += acc[k]
+
+                if cdr_acc["count"] > 0:
+                    results["cdr_accuracy"] = cdr_acc["correct"] / cdr_acc["count"]
+                    results["cdr_loss"] = cdr_acc["total_loss"] / cdr_acc["count"]
+                if fwr_acc["count"] > 0:
+                    results["fwr_accuracy"] = fwr_acc["correct"] / fwr_acc["count"]
+                    results["fwr_loss"] = fwr_acc["total_loss"] / fwr_acc["count"]
+
+            elif strategy == "chain":
+                # Aggregate by heavy vs light chain
+                heavy_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
+                light_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
+
+                for region_name, acc in region_accumulators.items():
+                    if region_name.startswith("h"):
+                        for k in heavy_acc:
+                            heavy_acc[k] += acc[k]
+                    elif region_name.startswith("l"):
+                        for k in light_acc:
+                            light_acc[k] += acc[k]
+
+                if heavy_acc["count"] > 0:
+                    results["heavy_accuracy"] = heavy_acc["correct"] / heavy_acc["count"]
+                    results["heavy_loss"] = heavy_acc["total_loss"] / heavy_acc["count"]
+                if light_acc["count"] > 0:
+                    results["light_accuracy"] = light_acc["correct"] / light_acc["count"]
+                    results["light_loss"] = light_acc["total_loss"] / light_acc["count"]
+
+            elif strategy == "region_type":
+                # Aggregate by CDR/FWR number across chains
+                type_accs: dict[str, dict[str, float]] = {}
+
+                for region_name, acc in region_accumulators.items():
+                    # Extract type (e.g., "cdr1" from "hcdr1" or "lcdr1")
+                    if region_name.startswith("h") or region_name.startswith("l"):
+                        region_type = region_name[1:]  # Remove chain prefix
+                    else:
+                        region_type = region_name
+
+                    if region_type not in type_accs:
+                        type_accs[region_type] = {
+                            "correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0
+                        }
+                    for k in type_accs[region_type]:
+                        type_accs[region_type][k] += acc[k]
+
+                for region_type, acc in type_accs.items():
+                    if acc["count"] > 0:
+                        results[f"{region_type}_accuracy"] = acc["correct"] / acc["count"]
+                        results[f"{region_type}_loss"] = acc["total_loss"] / acc["count"]
+
+        return results
 
     def evaluate_all(
         self,

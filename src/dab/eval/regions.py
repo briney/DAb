@@ -12,61 +12,62 @@ class AntibodyRegion(str, Enum):
     """Antibody structural regions.
 
     Regions follow the standard antibody structure:
-    FW1 - CDR1 - FW2 - CDR2 - FW3 - CDR3 - FW4
+    FWR1 - CDR1 - FWR2 - CDR2 - FWR3 - CDR3 - FWR4
 
-    Suffixes indicate chain: _h for heavy, _l for light.
+    Prefixes indicate chain: h for heavy, l for light.
+    Uses immunologically standard naming: hcdr1, lcdr3, hfwr1, etc.
     """
 
-    CDR1_H = "cdr1_h"
-    CDR2_H = "cdr2_h"
-    CDR3_H = "cdr3_h"
-    CDR1_L = "cdr1_l"
-    CDR2_L = "cdr2_l"
-    CDR3_L = "cdr3_l"
-    FW1_H = "fw1_h"
-    FW2_H = "fw2_h"
-    FW3_H = "fw3_h"
-    FW4_H = "fw4_h"
-    FW1_L = "fw1_l"
-    FW2_L = "fw2_l"
-    FW3_L = "fw3_l"
-    FW4_L = "fw4_l"
+    HCDR1 = "hcdr1"
+    HCDR2 = "hcdr2"
+    HCDR3 = "hcdr3"
+    LCDR1 = "lcdr1"
+    LCDR2 = "lcdr2"
+    LCDR3 = "lcdr3"
+    HFWR1 = "hfwr1"
+    HFWR2 = "hfwr2"
+    HFWR3 = "hfwr3"
+    HFWR4 = "hfwr4"
+    LFWR1 = "lfwr1"
+    LFWR2 = "lfwr2"
+    LFWR3 = "lfwr3"
+    LFWR4 = "lfwr4"
 
 
 # Convenience groupings
 CDR_REGIONS = frozenset(
     {
-        AntibodyRegion.CDR1_H,
-        AntibodyRegion.CDR2_H,
-        AntibodyRegion.CDR3_H,
-        AntibodyRegion.CDR1_L,
-        AntibodyRegion.CDR2_L,
-        AntibodyRegion.CDR3_L,
+        AntibodyRegion.HCDR1,
+        AntibodyRegion.HCDR2,
+        AntibodyRegion.HCDR3,
+        AntibodyRegion.LCDR1,
+        AntibodyRegion.LCDR2,
+        AntibodyRegion.LCDR3,
     }
 )
 
-FW_REGIONS = frozenset(
+FWR_REGIONS = frozenset(
     {
-        AntibodyRegion.FW1_H,
-        AntibodyRegion.FW2_H,
-        AntibodyRegion.FW3_H,
-        AntibodyRegion.FW4_H,
-        AntibodyRegion.FW1_L,
-        AntibodyRegion.FW2_L,
-        AntibodyRegion.FW3_L,
-        AntibodyRegion.FW4_L,
+        AntibodyRegion.HFWR1,
+        AntibodyRegion.HFWR2,
+        AntibodyRegion.HFWR3,
+        AntibodyRegion.HFWR4,
+        AntibodyRegion.LFWR1,
+        AntibodyRegion.LFWR2,
+        AntibodyRegion.LFWR3,
+        AntibodyRegion.LFWR4,
     }
 )
 
-HEAVY_REGIONS = frozenset({r for r in AntibodyRegion if r.value.endswith("_h")})
-LIGHT_REGIONS = frozenset({r for r in AntibodyRegion if r.value.endswith("_l")})
+HEAVY_REGIONS = frozenset({r for r in AntibodyRegion if r.value.startswith("h")})
+LIGHT_REGIONS = frozenset({r for r in AntibodyRegion if r.value.startswith("l")})
 
 # CDR regions per chain
 HEAVY_CDR_REGIONS = frozenset(
-    {AntibodyRegion.CDR1_H, AntibodyRegion.CDR2_H, AntibodyRegion.CDR3_H}
+    {AntibodyRegion.HCDR1, AntibodyRegion.HCDR2, AntibodyRegion.HCDR3}
 )
 LIGHT_CDR_REGIONS = frozenset(
-    {AntibodyRegion.CDR1_L, AntibodyRegion.CDR2_L, AntibodyRegion.CDR3_L}
+    {AntibodyRegion.LCDR1, AntibodyRegion.LCDR2, AntibodyRegion.LCDR3}
 )
 
 
@@ -281,22 +282,22 @@ def extract_region_masks(
     cdr3_mask = cdr_mask == 3
 
     # Assign CDR regions by chain (vectorized across batch)
-    if AntibodyRegion.CDR1_H in regions:
-        result[AntibodyRegion.CDR1_H] = cdr1_mask & heavy_chain_mask
-    if AntibodyRegion.CDR2_H in regions:
-        result[AntibodyRegion.CDR2_H] = cdr2_mask & heavy_chain_mask
-    if AntibodyRegion.CDR3_H in regions:
-        result[AntibodyRegion.CDR3_H] = cdr3_mask & heavy_chain_mask
-    if AntibodyRegion.CDR1_L in regions:
-        result[AntibodyRegion.CDR1_L] = cdr1_mask & light_chain_mask
-    if AntibodyRegion.CDR2_L in regions:
-        result[AntibodyRegion.CDR2_L] = cdr2_mask & light_chain_mask
-    if AntibodyRegion.CDR3_L in regions:
-        result[AntibodyRegion.CDR3_L] = cdr3_mask & light_chain_mask
+    if AntibodyRegion.HCDR1 in regions:
+        result[AntibodyRegion.HCDR1] = cdr1_mask & heavy_chain_mask
+    if AntibodyRegion.HCDR2 in regions:
+        result[AntibodyRegion.HCDR2] = cdr2_mask & heavy_chain_mask
+    if AntibodyRegion.HCDR3 in regions:
+        result[AntibodyRegion.HCDR3] = cdr3_mask & heavy_chain_mask
+    if AntibodyRegion.LCDR1 in regions:
+        result[AntibodyRegion.LCDR1] = cdr1_mask & light_chain_mask
+    if AntibodyRegion.LCDR2 in regions:
+        result[AntibodyRegion.LCDR2] = cdr2_mask & light_chain_mask
+    if AntibodyRegion.LCDR3 in regions:
+        result[AntibodyRegion.LCDR3] = cdr3_mask & light_chain_mask
 
     # Infer framework regions from CDR boundaries (requires per-sequence processing)
-    needs_fw = any(r in regions for r in FW_REGIONS)
-    if needs_fw:
+    needs_fwr = any(r in regions for r in FWR_REGIONS)
+    if needs_fwr:
         for b in range(batch_size):
             seq_cdr_mask = cdr_mask[b]
             seq_chain_ids = chain_ids[b]
@@ -321,18 +322,18 @@ def extract_region_masks(
                     seq_cdr_mask, seq_heavy_mask
                 )
                 if len(heavy_cdr_regions) == 3:
-                    fw_regions = _infer_framework_regions(
+                    fwr_regions = _infer_framework_regions(
                         heavy_cdr_regions, heavy_start, heavy_end, seq_special
                     )
-                    fw_names = [
-                        AntibodyRegion.FW1_H,
-                        AntibodyRegion.FW2_H,
-                        AntibodyRegion.FW3_H,
-                        AntibodyRegion.FW4_H,
+                    fwr_names = [
+                        AntibodyRegion.HFWR1,
+                        AntibodyRegion.HFWR2,
+                        AntibodyRegion.HFWR3,
+                        AntibodyRegion.HFWR4,
                     ]
-                    for i, (start, end) in enumerate(fw_regions):
-                        if fw_names[i] in regions and end > start:
-                            result[fw_names[i]][b, start:end] = True
+                    for i, (start, end) in enumerate(fwr_regions):
+                        if fwr_names[i] in regions and end > start:
+                            result[fwr_names[i]][b, start:end] = True
 
             # Process light chain frameworks
             light_positions = seq_light_mask.nonzero(as_tuple=True)[0]
@@ -345,18 +346,18 @@ def extract_region_masks(
                     seq_cdr_mask, seq_light_mask
                 )
                 if len(light_cdr_regions) == 3:
-                    fw_regions = _infer_framework_regions(
+                    fwr_regions = _infer_framework_regions(
                         light_cdr_regions, light_start, light_end, seq_special
                     )
-                    fw_names = [
-                        AntibodyRegion.FW1_L,
-                        AntibodyRegion.FW2_L,
-                        AntibodyRegion.FW3_L,
-                        AntibodyRegion.FW4_L,
+                    fwr_names = [
+                        AntibodyRegion.LFWR1,
+                        AntibodyRegion.LFWR2,
+                        AntibodyRegion.LFWR3,
+                        AntibodyRegion.LFWR4,
                     ]
-                    for i, (start, end) in enumerate(fw_regions):
-                        if fw_names[i] in regions and end > start:
-                            result[fw_names[i]][b, start:end] = True
+                    for i, (start, end) in enumerate(fwr_regions):
+                        if fwr_names[i] in regions and end > start:
+                            result[fwr_names[i]][b, start:end] = True
 
     return result
 
@@ -398,19 +399,19 @@ def aggregate_region_masks(
             result["cdr"] = torch.stack(cdr_masks).any(dim=0)
 
         # Aggregate all frameworks
-        fw_masks = [m for r, m in region_masks.items() if r in FW_REGIONS]
-        if fw_masks:
-            result["fw"] = torch.stack(fw_masks).any(dim=0)
+        fwr_masks = [m for r, m in region_masks.items() if r in FWR_REGIONS]
+        if fwr_masks:
+            result["fwr"] = torch.stack(fwr_masks).any(dim=0)
 
-    elif aggregate_by == "fw":
-        # Same as "cdr" - aggregate by CDR vs FW
+    elif aggregate_by == "fwr":
+        # Same as "cdr" - aggregate by CDR vs FWR
         cdr_masks = [m for r, m in region_masks.items() if r in CDR_REGIONS]
         if cdr_masks:
             result["cdr"] = torch.stack(cdr_masks).any(dim=0)
 
-        fw_masks = [m for r, m in region_masks.items() if r in FW_REGIONS]
-        if fw_masks:
-            result["fw"] = torch.stack(fw_masks).any(dim=0)
+        fwr_masks = [m for r, m in region_masks.items() if r in FWR_REGIONS]
+        if fwr_masks:
+            result["fwr"] = torch.stack(fwr_masks).any(dim=0)
 
     elif aggregate_by == "chain":
         # Aggregate by chain
@@ -423,12 +424,12 @@ def aggregate_region_masks(
             result["light"] = torch.stack(light_masks).any(dim=0)
 
     elif aggregate_by == "region_type":
-        # Aggregate by CDR/FW number across chains
+        # Aggregate by CDR/FWR number across chains
         # CDR1 (heavy + light)
         cdr1_masks = [
             m
             for r, m in region_masks.items()
-            if r in {AntibodyRegion.CDR1_H, AntibodyRegion.CDR1_L}
+            if r in {AntibodyRegion.HCDR1, AntibodyRegion.LCDR1}
         ]
         if cdr1_masks:
             result["cdr1"] = torch.stack(cdr1_masks).any(dim=0)
@@ -437,7 +438,7 @@ def aggregate_region_masks(
         cdr2_masks = [
             m
             for r, m in region_masks.items()
-            if r in {AntibodyRegion.CDR2_H, AntibodyRegion.CDR2_L}
+            if r in {AntibodyRegion.HCDR2, AntibodyRegion.LCDR2}
         ]
         if cdr2_masks:
             result["cdr2"] = torch.stack(cdr2_masks).any(dim=0)
@@ -446,25 +447,25 @@ def aggregate_region_masks(
         cdr3_masks = [
             m
             for r, m in region_masks.items()
-            if r in {AntibodyRegion.CDR3_H, AntibodyRegion.CDR3_L}
+            if r in {AntibodyRegion.HCDR3, AntibodyRegion.LCDR3}
         ]
         if cdr3_masks:
             result["cdr3"] = torch.stack(cdr3_masks).any(dim=0)
 
         # Frameworks
         for i in range(1, 5):
-            fw_masks = [
+            fwr_masks = [
                 m
                 for r, m in region_masks.items()
-                if r.value.startswith(f"fw{i}")
+                if r.value.endswith(f"fwr{i}")
             ]
-            if fw_masks:
-                result[f"fw{i}"] = torch.stack(fw_masks).any(dim=0)
+            if fwr_masks:
+                result[f"fwr{i}"] = torch.stack(fwr_masks).any(dim=0)
 
     else:
         raise ValueError(
             f"Unknown aggregate_by: {aggregate_by}. "
-            "Must be one of: 'all', 'cdr', 'fw', 'chain', 'region_type'"
+            "Must be one of: 'all', 'cdr', 'fwr', 'chain', 'region_type'"
         )
 
     return result

@@ -32,7 +32,7 @@ class RegionAccuracyMetric(MetricBase):
     regions : list[str] | None
         List of region names to evaluate. If None, evaluates all regions.
     aggregate_by : str
-        How to aggregate results: "all", "cdr", "fw", "chain", "region_type".
+        How to aggregate results: "all", "cdr", "fwr", "chain", "region_type".
     """
 
     name: ClassVar[str] = "region_acc"
@@ -69,18 +69,18 @@ class RegionAccuracyMetric(MetricBase):
             for region in self.regions:
                 self._correct[region.value] = 0
                 self._total[region.value] = 0
-        elif self.aggregate_by in ("cdr", "fw"):
+        elif self.aggregate_by in ("cdr", "fwr"):
             self._correct["cdr"] = 0
             self._total["cdr"] = 0
-            self._correct["fw"] = 0
-            self._total["fw"] = 0
+            self._correct["fwr"] = 0
+            self._total["fwr"] = 0
         elif self.aggregate_by == "chain":
             self._correct["heavy"] = 0
             self._total["heavy"] = 0
             self._correct["light"] = 0
             self._total["light"] = 0
         elif self.aggregate_by == "region_type":
-            for name in ["cdr1", "cdr2", "cdr3", "fw1", "fw2", "fw3", "fw4"]:
+            for name in ["cdr1", "cdr2", "cdr3", "fwr1", "fwr2", "fwr3", "fwr4"]:
                 self._correct[name] = 0
                 self._total[name] = 0
 
@@ -178,7 +178,7 @@ class RegionPerplexityMetric(MetricBase):
     regions : list[str] | None
         List of region names to evaluate. If None, evaluates all regions.
     aggregate_by : str
-        How to aggregate results: "all", "cdr", "fw", "chain", "region_type".
+        How to aggregate results: "all", "cdr", "fwr", "chain", "region_type".
     """
 
     name: ClassVar[str] = "region_ppl"
@@ -213,11 +213,11 @@ class RegionPerplexityMetric(MetricBase):
             for region in self.regions:
                 self._total_loss[region.value] = 0.0
                 self._total_tokens[region.value] = 0
-        elif self.aggregate_by in ("cdr", "fw"):
+        elif self.aggregate_by in ("cdr", "fwr"):
             self._total_loss["cdr"] = 0.0
             self._total_tokens["cdr"] = 0
-            self._total_loss["fw"] = 0.0
-            self._total_tokens["fw"] = 0
+            self._total_loss["fwr"] = 0.0
+            self._total_tokens["fwr"] = 0
         elif self.aggregate_by == "chain":
             self._total_loss["heavy"] = 0.0
             self._total_tokens["heavy"] = 0
@@ -315,7 +315,7 @@ class RegionLossMetric(MetricBase):
     regions : list[str] | None
         List of region names to evaluate. If None, evaluates all regions.
     aggregate_by : str
-        How to aggregate results: "all", "cdr", "fw", "chain", "region_type".
+        How to aggregate results: "all", "cdr", "fwr", "chain", "region_type".
     """
 
     name: ClassVar[str] = "region_loss"
@@ -350,11 +350,11 @@ class RegionLossMetric(MetricBase):
             for region in self.regions:
                 self._total_loss[region.value] = 0.0
                 self._total_tokens[region.value] = 0
-        elif self.aggregate_by in ("cdr", "fw"):
+        elif self.aggregate_by in ("cdr", "fwr"):
             self._total_loss["cdr"] = 0.0
             self._total_tokens["cdr"] = 0
-            self._total_loss["fw"] = 0.0
-            self._total_tokens["fw"] = 0
+            self._total_loss["fwr"] = 0.0
+            self._total_tokens["fwr"] = 0
         elif self.aggregate_by == "chain":
             self._total_loss["heavy"] = 0.0
             self._total_tokens["heavy"] = 0

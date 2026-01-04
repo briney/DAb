@@ -36,7 +36,7 @@ from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
 from .regions import (
     AntibodyRegion,
     CDR_REGIONS,
-    FW_REGIONS,
+    FWR_REGIONS,
     HEAVY_REGIONS,
     LIGHT_REGIONS,
     aggregate_region_masks,
@@ -60,7 +60,7 @@ __all__ = [
     # Regions
     "AntibodyRegion",
     "CDR_REGIONS",
-    "FW_REGIONS",
+    "FWR_REGIONS",
     "HEAVY_REGIONS",
     "LIGHT_REGIONS",
     "extract_region_masks",

@@ -36,10 +36,10 @@ class TestRegionAccuracyMetric:
 
         # CDR mask: positions 2-4, 6-8 in heavy, 12-14, 16-18 in light
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
-        cdr_mask[:, 2:5] = 1   # CDR1_H
-        cdr_mask[:, 6:9] = 1   # CDR2_H (position 9 won't exist, but 6-8)
-        cdr_mask[:, 12:15] = 1  # CDR1_L
-        cdr_mask[:, 16:19] = 1  # CDR2_L
+        cdr_mask[:, 2:5] = 1   # HCDR1
+        cdr_mask[:, 6:9] = 1   # HCDR2 (position 9 won't exist, but 6-8)
+        cdr_mask[:, 12:15] = 1  # LCDR1
+        cdr_mask[:, 16:19] = 1  # LCDR2
 
         return {
             "token_ids": token_ids,
@@ -70,9 +70,9 @@ class TestRegionAccuracyMetric:
         batch_size, seq_len = sample_batch["token_ids"].shape
         mask_labels = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         # Mask some positions
-        mask_labels[:, 3] = True  # In CDR1_H
-        mask_labels[:, 5] = True  # In FW (between CDR1_H and CDR2_H)
-        mask_labels[:, 13] = True  # In CDR1_L
+        mask_labels[:, 3] = True  # In HCDR1
+        mask_labels[:, 5] = True  # In FWR (between HCDR1 and HCDR2)
+        mask_labels[:, 13] = True  # In LCDR1
         return mask_labels
 
     def test_metric_creation(self):
@@ -83,7 +83,7 @@ class TestRegionAccuracyMetric:
 
     def test_metric_with_specific_regions(self):
         """Test metric with specific regions."""
-        metric = RegionAccuracyMetric(regions=["cdr1_h", "cdr3_l"])
+        metric = RegionAccuracyMetric(regions=["hcdr1", "lcdr3"])
         assert len(metric.regions) == 2
 
     def test_metric_update_and_compute(self, sample_batch, sample_outputs, sample_mask_labels):
@@ -95,9 +95,9 @@ class TestRegionAccuracyMetric:
         results = metric.compute()
 
         assert "cdr_acc" in results
-        assert "fw_acc" in results
+        assert "fwr_acc" in results
         assert 0.0 <= results["cdr_acc"] <= 1.0
-        assert 0.0 <= results["fw_acc"] <= 1.0
+        assert 0.0 <= results["fwr_acc"] <= 1.0
 
     def test_perfect_predictions(self, sample_batch, sample_outputs, sample_mask_labels):
         """Test with perfect predictions."""
@@ -205,10 +205,10 @@ class TestRegionPerplexityMetric:
         results = metric.compute()
 
         assert "cdr_ppl" in results
-        assert "fw_ppl" in results
+        assert "fwr_ppl" in results
         # Perplexity should be positive
         assert results["cdr_ppl"] > 0
-        assert results["fw_ppl"] > 0
+        assert results["fwr_ppl"] > 0
 
 
 class TestRegionLossMetric:
@@ -263,7 +263,7 @@ class TestRegionLossMetric:
         results = metric.compute()
 
         assert "cdr_loss" in results
-        assert "fw_loss" in results
+        assert "fwr_loss" in results
         # Loss should be positive (cross-entropy is always positive)
         assert results["cdr_loss"] > 0
-        assert results["fw_loss"] > 0
+        assert results["fwr_loss"] > 0

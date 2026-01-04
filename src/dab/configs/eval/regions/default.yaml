@@ -11,8 +11,8 @@ mode: per_position
 
 # Regions to include in evaluation
 # null = all regions, or specify a list:
-# ["cdr1_h", "cdr2_h", "cdr3_h", "cdr1_l", "cdr2_l", "cdr3_l",
-#  "fw1_h", "fw2_h", "fw3_h", "fw4_h", "fw1_l", "fw2_l", "fw3_l", "fw4_l"]
+# ["hcdr1", "hcdr2", "hcdr3", "lcdr1", "lcdr2", "lcdr3",
+#  "hfwr1", "hfwr2", "hfwr3", "hfwr4", "lfwr1", "lfwr2", "lfwr3", "lfwr4"]
 include: null
 
 # Batch size for per-position evaluation
@@ -20,11 +20,11 @@ include: null
 position_batch_size: 32
 
 # Aggregation strategies for results
-# - "all": Individual regions (cdr1_h_acc, cdr2_h_acc, ...)
-# - "cdr": CDRs vs frameworks (cdr_acc, fw_acc)
-# - "fw": Same as "cdr" (alias)
-# - "chain": Heavy vs light (heavy_acc, light_acc)
-# - "region_type": By CDR/FW number across chains (cdr1_acc, cdr2_acc, cdr3_acc, fw1_acc, ...)
+# - "all": Individual regions (hcdr1_accuracy, hcdr2_accuracy, ...)
+# - "cdr": CDRs vs frameworks (cdr_accuracy, fwr_accuracy)
+# - "fwr": Same as "cdr" (alias)
+# - "chain": Heavy vs light (heavy_accuracy, light_accuracy)
+# - "region_type": By CDR/FWR number across chains (cdr1_accuracy, cdr2_accuracy, fwr1_accuracy, ...)
 aggregate:
   - all
   - cdr

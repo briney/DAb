@@ -18,6 +18,7 @@ class DatasetConfig:
         batch_size: Override batch size for this dataset.
         load_coords: Whether to load 3D coordinates.
         metrics: Metrics configuration for this dataset.
+        regions: Region evaluation override for this dataset.
         format: Dataset format, either "sequence" or "structure".
             If None, auto-detected from path.
         chain_id: For structure datasets, specific chain to extract.
@@ -30,6 +31,7 @@ class DatasetConfig:
     batch_size: int | None = None
     load_coords: bool | None = None
     metrics: dict[str, Any] | None = None
+    regions: dict[str, Any] | None = None
     # Structure-specific options
     format: str | None = None  # "sequence" or "structure", auto-detected if None
     chain_id: str | None = None
@@ -255,6 +257,7 @@ def parse_eval_config(
                 batch_size=cfg.get("batch_size"),
                 load_coords=cfg.get("load_coords"),
                 metrics=dict(cfg.get("metrics", {})) if cfg.get("metrics") else None,
+                regions=dict(cfg.get("regions", {})) if cfg.get("regions") else None,
                 format=cfg.get("format"),
                 chain_id=cfg.get("chain_id"),
                 strict=cfg.get("strict", False),
