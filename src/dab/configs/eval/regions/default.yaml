@@ -8,7 +8,7 @@ enabled: true
 # - "standard": Uses existing eval masking, computes metrics on masked positions in regions (fast, default)
 # - "per_position": Mask one position at a time, aggregate by region (most detailed, slow)
 # - "region_level": Mask entire regions at once (tests region reconstruction)
-mode: standard
+mode: "per-position"
 
 # Regions to include in evaluation
 # null = all regions, or specify a list:
