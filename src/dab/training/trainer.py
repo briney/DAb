@@ -52,6 +52,7 @@ class TrainingConfig:
     # Diffusion
     noise_schedule: str = "cosine"
     num_timesteps: int = 100
+    use_information_weighted_masking: bool = True
     cdr_weight_multiplier: float = 1.0
     nongermline_weight_multiplier: float = 1.0
 
@@ -187,7 +188,9 @@ class Trainer:
 
         timesteps = self.masker.noise_schedule.sample_timesteps(batch_size, device)
 
-        if batch.get("cdr_mask") is not None or batch.get("non_templated_mask") is not None:
+        if self.config.use_information_weighted_masking and (
+            batch.get("cdr_mask") is not None or batch.get("non_templated_mask") is not None
+        ):
             masked_ids, mask_labels = self.masker.apply_mask(
                 token_ids=batch["token_ids"],
                 timesteps=timesteps,
