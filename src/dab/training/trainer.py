@@ -456,20 +456,20 @@ class Trainer:
 
         progress_bar.close()
 
-        # Final checkpoint
+        # Final evaluation - all processes must participate (distributed dataloaders require it)
+        if self.eval_dataloaders:
+            all_eval_metrics = self.evaluate_all()
+            final_metrics = {}
+            for eval_name, metrics in all_eval_metrics.items():
+                for metric_name, value in metrics.items():
+                    final_metrics[f"{eval_name}/{metric_name}"] = value
+        else:
+            final_metrics = {}
+
+        # Final checkpoint - only main process saves
         if self.accelerator.is_main_process:
-            if self.eval_dataloaders:
-                all_eval_metrics = self.evaluate_all()
-                # Flatten for checkpoint manager
-                final_metrics = {}
-                for eval_name, metrics in all_eval_metrics.items():
-                    for metric_name, value in metrics.items():
-                        final_metrics[f"{eval_name}/{metric_name}"] = value
-            else:
-                final_metrics = {}
             self.checkpoint_manager.save(
                 step=self.global_step, epoch=self.epoch, metrics=final_metrics
             )
-
             if self.logger is not None:
                 self.logger.finish()
