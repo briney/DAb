@@ -378,9 +378,9 @@ class Trainer:
                     self.epoch = self.global_step / self.steps_per_epoch
                     progress_bar.update(1)
 
-                    self.metrics.update("train_loss", step_metrics.loss)
-                    self.metrics.update("train_accuracy", step_metrics.accuracy)
-                    self.metrics.update("train_perplexity", step_metrics.perplexity)
+                    self.metrics.update("train/loss", step_metrics.loss)
+                    self.metrics.update("train/accuracy", step_metrics.accuracy)
+                    self.metrics.update("train/perplexity", step_metrics.perplexity)
 
                     # Pre-compute conditions for this step
                     should_log = self.global_step % self.config.log_steps == 0
