@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from .data import create_eval_dataloaders, create_train_dataloader
 from .diffusion import create_schedule
+from .eval import Evaluator
 from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
 from .training import Trainer, TrainingConfig
@@ -249,6 +250,15 @@ def run_training(
         noise_schedule=noise_schedule,
         accelerator=accelerator,
     )
+
+    # Create evaluator for advanced metrics (including region-based eval)
+    evaluator = Evaluator(
+        cfg=cfg,
+        model=model,
+        accelerator=accelerator,
+        objective="diffusion",
+    )
+    trainer.set_evaluator(evaluator)
 
     # Warn if multi-GPU available but not being used
     num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
