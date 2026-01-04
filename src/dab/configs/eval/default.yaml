@@ -51,16 +51,16 @@ metrics:
 
   # Region-based metrics (requires CDR annotations in data)
   region_accuracy:
-    enabled: false
+    enabled: true
     aggregate_by: all           # "all", "cdr", "fw", "chain", "region_type"
     regions: null               # null = all regions, or list of region names
 
   region_perplexity:
-    enabled: false
-    aggregate_by: cdr           # Aggregate CDRs vs frameworks
+    enabled: true
+    aggregate_by: all
     regions: null
 
   region_loss:
-    enabled: false
+    enabled: true
     aggregate_by: all
     regions: null
