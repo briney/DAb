@@ -178,6 +178,95 @@ class TestCreateScheduler:
             scheduler.step()
 
 
+    def test_linear_decay_reaches_min_at_correct_step(self, tiny_model):
+        """Verify linear decay reaches min_lr_ratio at exactly num_training_steps."""
+        base_lr = 1e-3
+        min_lr_ratio = 0.0
+        num_training_steps = 1000
+        num_warmup_steps = 100
+
+        optimizer = create_optimizer(tiny_model, lr=base_lr)
+        scheduler = create_scheduler(
+            optimizer,
+            scheduler_decay="linear",
+            num_training_steps=num_training_steps,
+            num_warmup_steps=num_warmup_steps,
+            min_lr_ratio=min_lr_ratio,
+        )
+
+        # Check warmup peak (step after warmup completes)
+        for _ in range(num_warmup_steps):
+            scheduler.step()
+        assert get_lr(optimizer) == pytest.approx(base_lr, rel=0.01)
+
+        # Check mid-decay (step 550 = 50% through 900-step decay phase)
+        for _ in range(450):
+            scheduler.step()
+        expected_mid = base_lr * 0.5  # Linear decay should be at 50%
+        assert get_lr(optimizer) == pytest.approx(expected_mid, rel=0.05)
+
+        # Check final step
+        for _ in range(450):
+            scheduler.step()
+        expected_final = base_lr * min_lr_ratio
+        assert get_lr(optimizer) == pytest.approx(expected_final, abs=1e-9)
+
+    def test_cosine_decay_reaches_min_at_correct_step(self, tiny_model):
+        """Verify cosine decay reaches min_lr_ratio at exactly num_training_steps."""
+        base_lr = 1e-3
+        min_lr_ratio = 0.1
+        num_training_steps = 1000
+        num_warmup_steps = 100
+
+        optimizer = create_optimizer(tiny_model, lr=base_lr)
+        scheduler = create_scheduler(
+            optimizer,
+            scheduler_decay="cosine",
+            num_training_steps=num_training_steps,
+            num_warmup_steps=num_warmup_steps,
+            min_lr_ratio=min_lr_ratio,
+        )
+
+        # Run to final step
+        for _ in range(num_training_steps):
+            scheduler.step()
+
+        expected_final = base_lr * min_lr_ratio
+        assert get_lr(optimizer) == pytest.approx(expected_final, rel=0.01)
+
+    def test_scheduler_trajectory_with_large_step_count(self, tiny_model):
+        """Verify scheduler works correctly with realistic step counts."""
+        base_lr = 3e-4
+        min_lr_ratio = 0.0
+        num_training_steps = 250000
+        num_warmup_steps = 10000
+
+        optimizer = create_optimizer(tiny_model, lr=base_lr)
+        scheduler = create_scheduler(
+            optimizer,
+            scheduler_decay="linear",
+            num_training_steps=num_training_steps,
+            num_warmup_steps=num_warmup_steps,
+            min_lr_ratio=min_lr_ratio,
+        )
+
+        # Check at step 10000 (end of warmup)
+        for _ in range(num_warmup_steps):
+            scheduler.step()
+        assert get_lr(optimizer) == pytest.approx(base_lr, rel=0.01)
+
+        # Check at step 130000 (50% through decay)
+        for _ in range(120000):
+            scheduler.step()
+        expected_mid = base_lr * 0.5
+        assert get_lr(optimizer) == pytest.approx(expected_mid, rel=0.01)
+
+        # Check at step 250000 (end of training)
+        for _ in range(120000):
+            scheduler.step()
+        assert get_lr(optimizer) == pytest.approx(0.0, abs=1e-9)
+
+
 class TestGetLR:
     def test_get_lr(self, tiny_model):
         lr = 3e-4

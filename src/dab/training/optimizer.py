@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch.optim import AdamW, Optimizer
-from torch.optim.lr_scheduler import (
-    CosineAnnealingLR,
-    LambdaLR,
-    LinearLR,
-    SequentialLR,
-    _LRScheduler,
-)
+from torch.optim.lr_scheduler import LambdaLR, _LRScheduler
 
 
 def create_optimizer(
@@ -48,47 +44,48 @@ def create_scheduler(
     num_warmup_steps: int = 1000,
     min_lr_ratio: float = 0.1,
 ) -> _LRScheduler:
-    """Create learning rate scheduler with warmup."""
-    if scheduler_decay == "constant":
+    """Create learning rate scheduler with warmup.
 
-        def lr_lambda(step: int) -> float:
-            if step < num_warmup_steps:
-                return step / max(1, num_warmup_steps)
+    Uses a single LambdaLR scheduler with explicit step-based multiplier calculation.
+    This approach is more robust than SequentialLR when used with Accelerate.
+
+    Args:
+        optimizer: The optimizer to schedule.
+        scheduler_decay: Type of decay after warmup ("constant", "linear", or "cosine").
+        num_training_steps: Total number of training steps.
+        num_warmup_steps: Number of warmup steps.
+        min_lr_ratio: Minimum learning rate as a ratio of the base learning rate.
+
+    Returns:
+        A LambdaLR scheduler.
+    """
+    if scheduler_decay not in ("constant", "linear", "cosine"):
+        raise ValueError(f"Unknown scheduler decay type: {scheduler_decay}")
+
+    def get_lr_multiplier(step: int) -> float:
+        """Compute LR multiplier for given step."""
+        # Warmup phase: linear increase from 0 to 1
+        if step < num_warmup_steps:
+            return step / max(1, num_warmup_steps)
+
+        # Post-warmup: apply decay
+        if scheduler_decay == "constant":
             return 1.0
 
-        return LambdaLR(optimizer, lr_lambda)
+        # Calculate progress through decay phase (0 to 1)
+        decay_steps = max(1, num_training_steps - num_warmup_steps)
+        progress = (step - num_warmup_steps) / decay_steps
+        progress = min(1.0, progress)  # Clamp to [0, 1]
 
-    elif scheduler_decay == "linear":
-        warmup = LinearLR(
-            optimizer, start_factor=1e-8, end_factor=1.0, total_iters=num_warmup_steps
-        )
-        # Ensure total_iters is at least 1 to avoid edge cases
-        decay_iters = max(1, num_training_steps - num_warmup_steps)
-        decay = LinearLR(
-            optimizer,
-            start_factor=1.0,
-            end_factor=min_lr_ratio,
-            total_iters=decay_iters,
-        )
-        return SequentialLR(
-            optimizer, schedulers=[warmup, decay], milestones=[num_warmup_steps]
-        )
+        if scheduler_decay == "linear":
+            # Linear decay from 1.0 to min_lr_ratio
+            return (1.0 - progress) * (1.0 - min_lr_ratio) + min_lr_ratio
 
-    elif scheduler_decay == "cosine":
-        warmup = LinearLR(
-            optimizer, start_factor=1e-8, end_factor=1.0, total_iters=num_warmup_steps
-        )
-        base_lr = optimizer.param_groups[0]["lr"]
-        min_lr = base_lr * min_lr_ratio
-        # Ensure T_max is at least 1 to avoid division by zero
-        t_max = max(1, num_training_steps - num_warmup_steps)
-        cosine = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=min_lr)
-        return SequentialLR(
-            optimizer, schedulers=[warmup, cosine], milestones=[num_warmup_steps]
-        )
+        else:  # cosine
+            # Cosine decay from 1.0 to min_lr_ratio
+            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (1 + math.cos(math.pi * progress))
 
-    else:
-        raise ValueError(f"Unknown scheduler decay type: {scheduler_decay}")
+    return LambdaLR(optimizer, get_lr_multiplier)
 
 
 def get_lr(optimizer: Optimizer) -> float:
