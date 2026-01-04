@@ -497,6 +497,10 @@ class Evaluator:
                     logits_flat, targets_flat, reduction="none"
                 ).view(batch_size, seq_len)
 
+                # Compute per-token probabilities for correct tokens
+                probs = torch.softmax(logits, dim=-1)
+                target_probs = probs.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+
                 # Extract region masks
                 try:
                     target_regions = regions if regions else set(AntibodyRegion)
@@ -529,11 +533,14 @@ class Evaluator:
                         region_accumulators[region_name] = {
                             "correct": 0,
                             "total_loss": 0.0,
+                            "total_prob": 0.0,
                             "count": 0,
                         }
                     acc = region_accumulators[region_name]
+                    region_prob = (target_probs * combined_mask.float()).sum().item()
                     acc["correct"] += region_correct
                     acc["total_loss"] += region_loss
+                    acc["total_prob"] += region_prob
                     acc["count"] += region_total
 
         # Compute final metrics
@@ -542,7 +549,7 @@ class Evaluator:
             if acc["count"] > 0:
                 results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
                 results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
-                # Compute perplexity from average loss
+                results[f"{region_name}_prob"] = acc["total_prob"] / acc["count"]
                 avg_loss = acc["total_loss"] / acc["count"]
                 results[f"{region_name}_ppl"] = torch.exp(torch.tensor(avg_loss)).item()
 
@@ -624,6 +631,8 @@ class Evaluator:
                 results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
                 results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
                 results[f"{region_name}_prob"] = acc["total_prob"] / acc["count"]
+                avg_loss = acc["total_loss"] / acc["count"]
+                results[f"{region_name}_ppl"] = torch.exp(torch.tensor(avg_loss)).item()
 
         # Apply aggregation strategies
         results.update(self._aggregate_region_results(region_accumulators, aggregate_strategies))
@@ -699,6 +708,8 @@ class Evaluator:
                 results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
                 results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
                 results[f"{region_name}_prob"] = acc["total_prob"] / acc["count"]
+                avg_loss = acc["total_loss"] / acc["count"]
+                results[f"{region_name}_ppl"] = torch.exp(torch.tensor(avg_loss)).item()
 
         # Apply aggregation strategies
         results.update(self._aggregate_region_results(region_accumulators, aggregate_strategies))
