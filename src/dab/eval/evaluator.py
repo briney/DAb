@@ -109,12 +109,18 @@ class Evaluator:
             List of Metric instances for this dataset.
         """
         if eval_name not in self._metrics_cache:
-            self._metrics_cache[eval_name] = build_metrics(
+            metrics = build_metrics(
                 cfg=self.cfg,
                 objective=self.objective,
                 has_coords=self.has_coords,
                 eval_name=eval_name,
             )
+            # If per-position region eval is enabled, skip redundant region metrics
+            region_cfg = self._get_region_config(eval_name)
+            if region_cfg.get("enabled", False):
+                region_metric_names = {"region_acc", "region_ppl", "region_loss"}
+                metrics = [m for m in metrics if m.name not in region_metric_names]
+            self._metrics_cache[eval_name] = metrics
         return self._metrics_cache[eval_name]
 
     def _needs_attentions(self, eval_name: str) -> bool:
