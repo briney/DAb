@@ -70,10 +70,10 @@ pad_to_max: false
 # Column names
 heavy_col: "sequence_aa:0"
 light_col: "sequence_aa:1"
-heavy_cdr_col: "cdr_mask:0"
-light_cdr_col: "cdr_mask:1"
-heavy_nongermline_col: "nongermline_mask:0"
-light_nongermline_col: "nongermline_mask:1"
+heavy_cdr_col: "cdr_mask_aa:0"
+light_cdr_col: "cdr_mask_aa:1"
+heavy_nongermline_col: "nongermline_mask_aa:0"
+light_nongermline_col: "nongermline_mask_aa:1"
 
 # Coordinate loading (global default, can be overridden per eval dataset)
 load_coords: false
