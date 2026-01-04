@@ -15,7 +15,7 @@ max_grad_norm: 1.0
 scheduler:
   decay: cosine
   warmup_steps: 1000
-  min_lr_ratio: 0.1
+  min_lr_ratio: 0.0
 
 log_steps: 10
 eval_steps: 500
