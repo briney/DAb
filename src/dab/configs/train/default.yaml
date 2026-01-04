@@ -18,8 +18,8 @@ scheduler:
   min_lr_ratio: 0.0
 
 log_steps: 10
-eval_steps: 500
-checkpoint_steps: 1000
+eval_steps: 5000
+checkpoint_steps: 50000
 
 checkpoint_dir: ${output_dir}/checkpoints
 keep_last_n_checkpoints: 5

@@ -1,9 +1,11 @@
 vocab_size: 32
 padding_idx: 1
 
-d_model: 256
-n_layers: 16
-n_heads: 4
+# 99M parameters (if no chain-aware attention)
+# 124M parameters (if chain-aware attention)
+d_model: 384
+n_layers: 56
+n_heads: 6
 d_ffn: null
 ffn_multiplier: null
 
