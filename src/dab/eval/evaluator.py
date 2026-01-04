@@ -425,7 +425,7 @@ class Evaluator:
             model=self.model,
             position_batch_size=position_batch_size,
             device=device,
-            show_progress=self._show_progress(),
+            show_progress=False,  # Outer tqdm handles progress
         )
 
         # Accumulate results across all samples
