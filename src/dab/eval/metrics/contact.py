@@ -482,11 +482,11 @@ class PrecisionAtLMetric(MetricBase):
             total_count = 0
 
             for item in gathered:
-                if item is not None:
-                    all_features.extend(item["features"])
-                    all_targets.extend(item["targets"])
-                    total_correct += item["correct"]
-                    total_count += item["total"]
+                if item is not None and isinstance(item, dict):
+                    all_features.extend(item.get("features", []))
+                    all_targets.extend(item.get("targets", []))
+                    total_correct += item.get("correct", 0)
+                    total_count += item.get("total", 0)
 
             self._logreg_features = all_features[:self.logreg_n_train]
             self._logreg_targets = all_targets[:self.logreg_n_train]

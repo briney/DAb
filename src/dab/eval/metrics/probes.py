@@ -162,7 +162,7 @@ class ProbeMetricBase(MetricBase):
 
     def state_objects(self) -> list[Any] | None:
         """Return state for distributed gathering."""
-        return (self._features, self._targets)
+        return {"features": self._features, "targets": self._targets}
 
     def load_state_objects(self, gathered: list[Any]) -> None:
         """Load state from gathered objects."""
@@ -170,10 +170,9 @@ class ProbeMetricBase(MetricBase):
         all_targets = []
 
         for item in gathered:
-            if item is not None:
-                features, targets = item
-                all_features.extend(features)
-                all_targets.extend(targets)
+            if item is not None and isinstance(item, dict):
+                all_features.extend(item.get("features", []))
+                all_targets.extend(item.get("targets", []))
 
         self._features = all_features[:self.n_train]
         self._targets = all_targets[:self.n_train]
