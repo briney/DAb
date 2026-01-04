@@ -66,13 +66,14 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def _create_padding_mask(
-        self, attention_mask: Tensor | None
+        self, attention_mask: Tensor | None, input_dtype: torch.dtype
     ) -> Tensor | None:
         """
         Create additive padding mask for attention.
 
         Args:
             attention_mask: Optional padding mask of shape (batch, seq_len)
+            input_dtype: Dtype of input tensor (for mixed precision compatibility)
 
         Returns:
             Additive mask with -inf for padding (batch, 1, 1, seq_len) or None
@@ -81,7 +82,8 @@ class MultiHeadAttention(nn.Module):
             return None
 
         # Create additive mask: 0 where valid, -inf where padding
-        padding_mask = torch.zeros_like(attention_mask, dtype=torch.float)
+        # Use same dtype as input for mixed precision compatibility
+        padding_mask = torch.zeros_like(attention_mask, dtype=input_dtype)
         padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
         padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
         return padding_mask
@@ -124,7 +126,7 @@ class MultiHeadAttention(nn.Module):
             scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
 
             # Apply padding mask
-            padding_mask = self._create_padding_mask(attention_mask)
+            padding_mask = self._create_padding_mask(attention_mask, x.dtype)
             if padding_mask is not None:
                 scores = scores + padding_mask
 
@@ -137,7 +139,7 @@ class MultiHeadAttention(nn.Module):
             output = torch.matmul(attn_weights, v)
         else:
             # Use efficient SDPA
-            padding_mask = self._create_padding_mask(attention_mask)
+            padding_mask = self._create_padding_mask(attention_mask, x.dtype)
 
             output = F.scaled_dot_product_attention(
                 q,
@@ -216,7 +218,10 @@ class ChainAwareAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def _create_chain_mask(
-        self, chain_ids: Tensor, attention_mask: Tensor | None
+        self,
+        chain_ids: Tensor,
+        attention_mask: Tensor | None,
+        input_dtype: torch.dtype,
     ) -> tuple[Tensor, Tensor | None]:
         """
         Create intra-chain mask and padding mask.
@@ -224,6 +229,7 @@ class ChainAwareAttention(nn.Module):
         Args:
             chain_ids: Chain identity tensor of shape (batch, seq_len)
             attention_mask: Optional padding mask of shape (batch, seq_len)
+            input_dtype: Dtype of input tensor (for mixed precision compatibility)
 
         Returns:
             intra_mask: Boolean mask where True = same chain (batch, 1, seq_len, seq_len)
@@ -237,7 +243,8 @@ class ChainAwareAttention(nn.Module):
         # Padding mask
         if attention_mask is not None:
             # Create additive mask: 0 where valid, -inf where padding
-            padding_mask = torch.zeros_like(attention_mask, dtype=torch.float)
+            # Use same dtype as input for mixed precision compatibility
+            padding_mask = torch.zeros_like(attention_mask, dtype=input_dtype)
             padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
             padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
         else:
@@ -287,10 +294,12 @@ class ChainAwareAttention(nn.Module):
         scores_cross = torch.matmul(q_cross, k_cross.transpose(-2, -1)) * self.scale
 
         # Create chain masks
-        intra_mask, padding_mask = self._create_chain_mask(chain_ids, attention_mask)
+        intra_mask, padding_mask = self._create_chain_mask(
+            chain_ids, attention_mask, x.dtype
+        )
 
-        # Convert intra_mask to float for torch.where and later multiplication
-        intra_mask_float = intra_mask.float()
+        # Convert intra_mask to same dtype as input for torch.where and later multiplication
+        intra_mask_float = intra_mask.to(x.dtype)
 
         # Merge attention scores before softmax:
         # Use self scores for intra-chain pairs, cross scores for inter-chain pairs
