@@ -49,18 +49,4 @@ metrics:
     sample_per_seq: 20
     n_train: 100
 
-  # Region-based metrics (requires CDR annotations in data)
-  region_accuracy:
-    enabled: true
-    aggregate_by: all           # "all", "cdr", "fw", "chain", "region_type"
-    regions: ["hcdr3", "lcdr3"]               # null = all regions, or list of region names
-
-  region_perplexity:
-    enabled: true
-    aggregate_by: all
-    regions: ["hcdr3", "lcdr3"]
-
-  region_loss:
-    enabled: true
-    aggregate_by: all
-    regions: ["hcdr3", "lcdr3"]
+  # Region-based metrics are now configured via eval.regions (see regions/default.yaml)

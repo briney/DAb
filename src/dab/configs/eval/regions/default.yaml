@@ -1,13 +1,14 @@
 # Region-specific evaluation configuration
 # Enables detailed analysis of model performance across antibody regions
 
-# Enable region-specific evaluation
-enabled: false
+# Enable region-specific evaluation (enabled by default)
+enabled: true
 
 # Evaluation mode:
-# - "per_position": Mask one position at a time, aggregate by region (most detailed)
-# - "region_level": Mask entire regions at once (faster, tests region reconstruction)
-mode: per_position
+# - "standard": Uses existing eval masking, computes metrics on masked positions in regions (fast, default)
+# - "per_position": Mask one position at a time, aggregate by region (most detailed, slow)
+# - "region_level": Mask entire regions at once (tests region reconstruction)
+mode: standard
 
 # Regions to include in evaluation
 # null = all regions, or specify a list:

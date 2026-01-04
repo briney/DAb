@@ -13,10 +13,8 @@ from ..regions import (
     aggregate_region_masks,
     extract_region_masks,
 )
-from ..registry import register_metric
 
 
-@register_metric("region_accuracy")
 class RegionAccuracyMetric(MetricBase):
     """Per-region masked token accuracy.
 
@@ -166,7 +164,6 @@ class RegionAccuracyMetric(MetricBase):
                 self._total[region_name] = int(values[i * 2 + 1].item())
 
 
-@register_metric("region_perplexity")
 class RegionPerplexityMetric(MetricBase):
     """Per-region perplexity metric.
 
@@ -304,7 +301,6 @@ class RegionPerplexityMetric(MetricBase):
                 self._total_tokens[region_name] = int(values[i * 2 + 1].item())
 
 
-@register_metric("region_loss")
 class RegionLossMetric(MetricBase):
     """Per-region cross-entropy loss metric.
 

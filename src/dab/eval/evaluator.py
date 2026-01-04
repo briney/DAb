@@ -115,11 +115,6 @@ class Evaluator:
                 has_coords=self.has_coords,
                 eval_name=eval_name,
             )
-            # If per-position region eval is enabled, skip redundant region metrics
-            region_cfg = self._get_region_config(eval_name)
-            if region_cfg.get("enabled", False):
-                region_metric_names = {"region_acc", "region_ppl", "region_loss"}
-                metrics = [m for m in metrics if m.name not in region_metric_names]
             self._metrics_cache[eval_name] = metrics
         return self._metrics_cache[eval_name]
 
@@ -375,6 +370,8 @@ class Evaluator:
         eval_loader: DataLoader,
         eval_name: str,
         region_cfg: dict[str, Any],
+        mask_labels_cache: list[torch.Tensor] | None = None,
+        batch_cache: list[dict[str, torch.Tensor]] | None = None,
     ) -> dict[str, float]:
         """Run region-based evaluation.
 
@@ -382,11 +379,13 @@ class Evaluator:
             eval_loader: DataLoader for the evaluation dataset.
             eval_name: Name of the evaluation dataset.
             region_cfg: Region evaluation configuration.
+            mask_labels_cache: Cached mask labels from main evaluation (for standard mode).
+            batch_cache: Cached batches from main evaluation (for standard mode).
 
         Returns:
             Dictionary mapping region metric names to values.
         """
-        mode = region_cfg.get("mode", "per_position")
+        mode = region_cfg.get("mode", "standard")
         include = region_cfg.get("include")  # None = all regions
         position_batch_size = region_cfg.get("position_batch_size", 32)
         aggregate_strategies = region_cfg.get("aggregate", ["all"])
@@ -397,9 +396,12 @@ class Evaluator:
         else:
             regions = None  # All regions
 
-        device = _get_model_device(self.model, self.accelerator)
-
-        if mode == "per_position":
+        if mode == "standard":
+            return self._run_standard_eval(
+                eval_loader, eval_name, regions, aggregate_strategies,
+                mask_labels_cache, batch_cache
+            )
+        elif mode == "per_position":
             return self._run_per_position_eval(
                 eval_loader, regions, position_batch_size, aggregate_strategies
             )
@@ -407,6 +409,144 @@ class Evaluator:
             return self._run_region_level_eval(
                 eval_loader, regions, aggregate_strategies
             )
+
+    def _run_standard_eval(
+        self,
+        eval_loader: DataLoader,
+        eval_name: str,
+        regions: set[AntibodyRegion] | None,
+        aggregate_strategies: list[str],
+        mask_labels_cache: list[torch.Tensor] | None = None,
+        batch_cache: list[dict[str, torch.Tensor]] | None = None,
+    ) -> dict[str, float]:
+        """Run standard region evaluation using existing masking.
+
+        This mode computes region metrics on positions that are both:
+        - Masked during evaluation
+        - Within the specified regions
+
+        Args:
+            eval_loader: DataLoader for the evaluation dataset.
+            eval_name: Name of the evaluation dataset.
+            regions: Set of regions to evaluate, or None for all.
+            aggregate_strategies: List of aggregation strategies.
+            mask_labels_cache: Optional cached mask labels from main evaluation.
+            batch_cache: Optional cached batches from main evaluation.
+
+        Returns:
+            Dictionary mapping region metric names to values.
+        """
+        from .regions import aggregate_region_masks, extract_region_masks
+
+        device = _get_model_device(self.model, self.accelerator)
+
+        # Accumulators per region: {region_name: {correct, total_loss, total_tokens}}
+        region_accumulators: dict[str, dict[str, float]] = {}
+
+        # Get seeded generator for reproducible masking
+        generator = None
+        if self.eval_masker is not None:
+            generator = self.eval_masker.get_generator(device)
+
+        self.model.eval()
+        with torch.no_grad():
+            for batch in tqdm(
+                eval_loader,
+                desc="Region eval (standard)",
+                disable=not self._show_progress()
+            ):
+                # Move batch to device if not using accelerator
+                if self.accelerator is None:
+                    batch = {
+                        k: v.to(device) if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()
+                    }
+
+                # Skip if no CDR mask available
+                if batch.get("cdr_mask") is None:
+                    continue
+
+                # Create mask labels (same logic as main evaluate())
+                if self.eval_masker is not None:
+                    masked_ids, mask_labels = self.eval_masker.apply_mask(
+                        batch=batch,
+                        generator=generator,
+                    )
+                else:
+                    mask_labels = self._create_eval_mask(batch, device)
+                    masked_ids = batch["token_ids"].clone()
+                    from ..tokenizer import tokenizer
+                    masked_ids[mask_labels.bool()] = tokenizer.mask_token_id
+
+                # Forward pass
+                outputs = self.model(
+                    token_ids=masked_ids,
+                    chain_ids=batch["chain_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+                logits = outputs["logits"]
+                targets = batch["token_ids"]
+                predictions = logits.argmax(dim=-1)
+
+                # Compute per-token loss
+                batch_size, seq_len, vocab_size = logits.shape
+                logits_flat = logits.view(-1, vocab_size)
+                targets_flat = targets.view(-1)
+                loss_per_token = torch.nn.functional.cross_entropy(
+                    logits_flat, targets_flat, reduction="none"
+                ).view(batch_size, seq_len)
+
+                # Extract region masks
+                try:
+                    target_regions = regions if regions else set(AntibodyRegion)
+                    region_masks = extract_region_masks(batch, target_regions)
+                except ValueError:
+                    continue
+
+                # Aggregate if needed
+                if "all" in aggregate_strategies:
+                    aggregated = {r.value: m for r, m in region_masks.items()}
+                else:
+                    aggregated = {}
+
+                for strategy in aggregate_strategies:
+                    if strategy != "all":
+                        agg_masks = aggregate_region_masks(region_masks, strategy)
+                        aggregated.update(agg_masks)
+
+                mask = mask_labels.bool()
+                correct_mask = (predictions == targets) & mask
+
+                for region_name, region_mask in aggregated.items():
+                    # Only count positions that are both masked and in this region
+                    combined_mask = mask & region_mask
+                    region_correct = (correct_mask & region_mask).sum().item()
+                    region_loss = (loss_per_token * combined_mask.float()).sum().item()
+                    region_total = combined_mask.sum().item()
+
+                    if region_name not in region_accumulators:
+                        region_accumulators[region_name] = {
+                            "correct": 0,
+                            "total_loss": 0.0,
+                            "count": 0,
+                        }
+                    acc = region_accumulators[region_name]
+                    acc["correct"] += region_correct
+                    acc["total_loss"] += region_loss
+                    acc["count"] += region_total
+
+        # Compute final metrics
+        results: dict[str, float] = {}
+        for region_name, acc in region_accumulators.items():
+            if acc["count"] > 0:
+                results[f"{region_name}_accuracy"] = acc["correct"] / acc["count"]
+                results[f"{region_name}_loss"] = acc["total_loss"] / acc["count"]
+                # Compute perplexity from average loss
+                avg_loss = acc["total_loss"] / acc["count"]
+                results[f"{region_name}_ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+
+        return results
 
     def _run_per_position_eval(
         self,
