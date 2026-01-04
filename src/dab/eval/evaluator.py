@@ -147,8 +147,10 @@ class Evaluator:
             state_objects = metric.state_objects()
 
             if state_objects is not None:
-                # Use gather_object for variable-length state
-                gathered = self.accelerator.gather_object(state_objects)
+                # Use gather_for_metrics with use_gather_object for variable-length state
+                gathered = self.accelerator.gather_for_metrics(
+                    state_objects, use_gather_object=True
+                )
                 metric.load_state_objects(gathered)
             else:
                 # Use tensor-based gathering for fixed-size state
