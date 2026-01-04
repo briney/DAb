@@ -53,14 +53,14 @@ metrics:
   region_accuracy:
     enabled: true
     aggregate_by: all           # "all", "cdr", "fw", "chain", "region_type"
-    regions: null               # null = all regions, or list of region names
+    regions: ["hcdr3", "lcdr3"]               # null = all regions, or list of region names
 
   region_perplexity:
     enabled: true
     aggregate_by: all
-    regions: null
+    regions: ["hcdr3", "lcdr3"]
 
   region_loss:
     enabled: true
     aggregate_by: all
-    regions: null
+    regions: ["hcdr3", "lcdr3"]
