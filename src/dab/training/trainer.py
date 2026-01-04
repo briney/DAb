@@ -118,8 +118,9 @@ class Trainer:
             self.model,
             self.optimizer,
             self.train_dataloader,
-            self.scheduler,
-        ) = self.accelerator.prepare(model, self.optimizer, train_dataloader, self.scheduler)
+        ) = self.accelerator.prepare(model, self.optimizer, train_dataloader)
+        # Note: scheduler is intentionally NOT prepared by Accelerate.
+        # AcceleratedScheduler causes 8x step rate in multi-GPU DDP training.
 
         # Support both single eval_dataloader (legacy) and multiple eval_dataloaders
         self.eval_dataloader = (
