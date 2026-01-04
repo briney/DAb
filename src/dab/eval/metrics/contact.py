@@ -464,10 +464,12 @@ class PrecisionAtLMetric(MetricBase):
     def state_objects(self) -> list[Any] | None:
         """Return state objects for logreg mode."""
         if self.use_logistic_regression:
-            return [
-                (self._logreg_features, self._logreg_targets),
-                (self._correct, self._total),
-            ]
+            return {
+                "features": self._logreg_features,
+                "targets": self._logreg_targets,
+                "correct": self._correct,
+                "total": self._total,
+            }
         return None
 
     def load_state_objects(self, gathered: list[Any]) -> None:
@@ -479,14 +481,12 @@ class PrecisionAtLMetric(MetricBase):
             total_correct = 0
             total_count = 0
 
-            for obj_list in gathered:
-                if obj_list and len(obj_list) >= 2:
-                    features, targets = obj_list[0]
-                    correct, count = obj_list[1]
-                    all_features.extend(features)
-                    all_targets.extend(targets)
-                    total_correct += correct
-                    total_count += count
+            for item in gathered:
+                if item is not None:
+                    all_features.extend(item["features"])
+                    all_targets.extend(item["targets"])
+                    total_correct += item["correct"]
+                    total_count += item["total"]
 
             self._logreg_features = all_features[:self.logreg_n_train]
             self._logreg_targets = all_targets[:self.logreg_n_train]
