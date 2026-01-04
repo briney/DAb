@@ -13,7 +13,7 @@ mode: per_position
 # null = all regions, or specify a list:
 # ["hcdr1", "hcdr2", "hcdr3", "lcdr1", "lcdr2", "lcdr3",
 #  "hfwr1", "hfwr2", "hfwr3", "hfwr4", "lfwr1", "lfwr2", "lfwr3", "lfwr4"]
-include: ["hcdr3", "lcdr3"]
+include: null
 
 # Batch size for per-position evaluation
 # Higher values = faster but more memory
