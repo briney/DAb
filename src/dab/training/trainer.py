@@ -15,6 +15,7 @@ from ..diffusion import InformationWeightedMasker, NoiseSchedule, UniformMasker
 from ..model import DAbModel
 from .checkpoint import CheckpointConfig, CheckpointManager
 from .metrics import (
+    DiffusionMetrics,
     MetricAccumulator,
     compute_diffusion_metrics,
     compute_masked_cross_entropy,
@@ -205,8 +206,14 @@ class Trainer:
 
         return {"masked_ids": masked_ids, "mask_labels": mask_labels, "timesteps": timesteps}
 
-    def training_step(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Execute a single training step."""
+    def training_step(
+        self, batch: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, DiffusionMetrics]:
+        """Execute a single training step.
+
+        Returns:
+            Tuple of (loss tensor for backprop, DiffusionMetrics with all metrics).
+        """
         mask_output = self._apply_masking(batch)
 
         outputs = self.model(
@@ -215,13 +222,21 @@ class Trainer:
             attention_mask=batch["attention_mask"],
         )
 
+        metrics = compute_diffusion_metrics(
+            logits=outputs["logits"],
+            targets=batch["token_ids"],
+            mask_labels=mask_output["mask_labels"],
+            attention_mask=batch["attention_mask"],
+        )
+
+        # Recompute loss tensor for backprop (metrics.loss is a float)
         loss = compute_masked_cross_entropy(
             logits=outputs["logits"],
             targets=batch["token_ids"],
             mask_labels=mask_output["mask_labels"],
         )
 
-        return loss
+        return loss, metrics
 
     @torch.no_grad()
     def evaluate(self) -> dict[str, float]:
@@ -346,7 +361,7 @@ class Trainer:
         while self.global_step < total_steps:
             for batch in self.train_dataloader:
                 with self.accelerator.accumulate(self.model):
-                    loss = self.training_step(batch)
+                    loss, step_metrics = self.training_step(batch)
                     self.accelerator.backward(loss)
 
                     if self.accelerator.sync_gradients:
@@ -363,7 +378,9 @@ class Trainer:
                     self.epoch = self.global_step / self.steps_per_epoch
                     progress_bar.update(1)
 
-                    self.metrics.update("train_loss", loss.item())
+                    self.metrics.update("train_loss", step_metrics.loss)
+                    self.metrics.update("train_accuracy", step_metrics.accuracy)
+                    self.metrics.update("train_perplexity", step_metrics.perplexity)
 
                     # Pre-compute conditions for this step
                     should_log = self.global_step % self.config.log_steps == 0
