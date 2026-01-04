@@ -373,10 +373,11 @@ class Trainer:
                         )
 
                     self.optimizer.step()
-                    self.scheduler.step()
                     self.optimizer.zero_grad()
 
                 if self.accelerator.sync_gradients:
+                    # Step scheduler once per actual training step, not per GPU
+                    self.scheduler.step()
                     self.global_step += 1
                     self.epoch = self.global_step / self.steps_per_epoch
                     progress_bar.update(1)
