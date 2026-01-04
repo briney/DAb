@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from .base import Metric
 
@@ -110,7 +109,10 @@ def _get_metric_config(
     global_metrics = eval_cfg.get("metrics", {})
     if metric_name in global_metrics:
         global_metric_cfg = global_metrics[metric_name]
-        if isinstance(global_metric_cfg, dict):
+        # Handle both dict and OmegaConf DictConfig
+        if isinstance(global_metric_cfg, DictConfig):
+            result.update(OmegaConf.to_container(global_metric_cfg))
+        elif isinstance(global_metric_cfg, dict):
             result.update(global_metric_cfg)
 
     # 2. Per-dataset overrides
@@ -128,7 +130,10 @@ def _get_metric_config(
         # Apply per-metric overrides
         if metric_name in dataset_metrics:
             metric_override = dataset_metrics[metric_name]
-            if isinstance(metric_override, dict):
+            # Handle both dict and OmegaConf DictConfig
+            if isinstance(metric_override, DictConfig):
+                result.update(OmegaConf.to_container(metric_override))
+            elif isinstance(metric_override, dict):
                 result.update(metric_override)
 
     return result
