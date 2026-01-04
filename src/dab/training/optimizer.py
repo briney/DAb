@@ -62,30 +62,38 @@ def create_scheduler(
     if scheduler_decay not in ("constant", "linear", "cosine"):
         raise ValueError(f"Unknown scheduler decay type: {scheduler_decay}")
 
-    def get_lr_multiplier(step: int) -> float:
-        """Compute LR multiplier for given step."""
-        # Warmup phase: linear increase from 0 to 1
-        if step < num_warmup_steps:
-            return step / max(1, num_warmup_steps)
+    # Pre-compute and capture as concrete Python values (not OmegaConf references)
+    # This ensures the lambda captures actual ints/floats, not config objects
+    warmup_steps = int(num_warmup_steps)
+    total_steps = int(num_training_steps)
+    decay_steps = max(0, total_steps - warmup_steps)
+    min_lr = float(min_lr_ratio)
+    decay_type = str(scheduler_decay).lower()
 
-        # Post-warmup: apply decay
-        if scheduler_decay == "constant":
+    def lr_lambda(current_step: int) -> float:
+        # Warmup phase (0 -> 1)
+        if warmup_steps > 0 and current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+
+        # Constant - stay at 1.0
+        if decay_type == "constant":
             return 1.0
 
-        # Calculate progress through decay phase (0 to 1)
-        decay_steps = max(1, num_training_steps - num_warmup_steps)
-        progress = (step - num_warmup_steps) / decay_steps
-        progress = min(1.0, progress)  # Clamp to [0, 1]
+        # Decay phase
+        if decay_steps <= 0:
+            return 1.0
 
-        if scheduler_decay == "linear":
-            # Linear decay from 1.0 to min_lr_ratio
-            return (1.0 - progress) * (1.0 - min_lr_ratio) + min_lr_ratio
+        t = current_step - warmup_steps
+        progress = min(max(float(t) / float(decay_steps), 0.0), 1.0)
 
-        else:  # cosine
-            # Cosine decay from 1.0 to min_lr_ratio
-            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (1 + math.cos(math.pi * progress))
+        if decay_type == "cosine":
+            # Cosine decay from 1.0 to min_lr
+            return min_lr + 0.5 * (1.0 - min_lr) * (1.0 + math.cos(math.pi * progress))
+        else:  # linear
+            # Linear decay from 1.0 to min_lr
+            return min_lr + (1.0 - min_lr) * (1.0 - progress)
 
-    return LambdaLR(optimizer, get_lr_multiplier)
+    return LambdaLR(optimizer, lr_lambda)
 
 
 def get_lr(optimizer: Optimizer) -> float:
