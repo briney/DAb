@@ -39,6 +39,10 @@ class RegionEvalConfig:
         Enable aggregate statistics for all light chain regions.
     overall
         Enable aggregate statistics across all regions.
+    germline
+        Enable aggregate statistics for germline positions (non_templated_mask == 0).
+    nongermline
+        Enable aggregate statistics for nongermline positions (non_templated_mask == 1).
     """
 
     enabled: bool = False
@@ -63,12 +67,14 @@ class RegionEvalConfig:
     lfwr3: bool = False
     lfwr4: bool = False
 
-    # Aggregate groups (5 total)
+    # Aggregate groups (7 total)
     all_cdr: bool = False
     all_fwr: bool = False
     heavy: bool = False
     light: bool = False
     overall: bool = False
+    germline: bool = False
+    nongermline: bool = False
 
     def get_enabled_regions(self) -> set[str]:
         """Return set of individually enabled region names.
@@ -127,7 +133,7 @@ _INDIVIDUAL_REGIONS = (
     "lfwr4",
 )
 
-_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall")
+_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall", "germline", "nongermline")
 
 
 def build_region_eval_config(cfg_dict: dict) -> RegionEvalConfig:

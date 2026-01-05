@@ -370,3 +370,107 @@ class TestMaskingFrequencyTracker:
 
         aggregates = tracker.get_enabled_aggregates()
         assert aggregates == {"all_cdr", "heavy"}
+
+    @pytest.fixture
+    def sample_batch_with_nongermline_mask(self, sample_batch_with_cdr_mask):
+        """Add non_templated_mask to the sample batch.
+
+        Non-germline positions (value=1) are set at CDR positions,
+        germline positions (value=0) at framework positions.
+        """
+        batch = sample_batch_with_cdr_mask.copy()
+        batch_size, seq_len = 2, 40
+
+        # Create non_templated_mask: 0=germline, 1=nongermline
+        # Set CDR positions as nongermline, FWR as germline
+        non_templated_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
+        # Heavy CDRs - nongermline
+        non_templated_mask[:, 4:7] = 1    # HCDR1
+        non_templated_mask[:, 10:13] = 1  # HCDR2
+        non_templated_mask[:, 16:19] = 1  # HCDR3
+        # Light CDRs - nongermline
+        non_templated_mask[:, 23:26] = 1  # LCDR1
+        non_templated_mask[:, 29:32] = 1  # LCDR2
+        non_templated_mask[:, 35:38] = 1  # LCDR3
+
+        batch["non_templated_mask"] = non_templated_mask
+        return batch
+
+    def test_germline_tracking(self, sample_batch_with_nongermline_mask):
+        """Test germline aggregate tracking."""
+        config = MaskingFrequencyConfig(enabled=True, germline=True)
+        tracker = MaskingFrequencyTracker(config)
+
+        # Mask some germline (framework) positions
+        mask_labels = torch.zeros(2, 40, dtype=torch.bool)
+        mask_labels[:, 1:4] = True  # HFWR1 positions (germline)
+
+        tracker.update(mask_labels, sample_batch_with_nongermline_mask)
+        results = tracker.compute()
+
+        assert "germline/fraction_masked" in results
+        assert "germline/share_of_total" in results
+        # All masked tokens are germline
+        assert results["germline/share_of_total"] == 1.0
+
+    def test_nongermline_tracking(self, sample_batch_with_nongermline_mask):
+        """Test nongermline aggregate tracking."""
+        config = MaskingFrequencyConfig(enabled=True, nongermline=True)
+        tracker = MaskingFrequencyTracker(config)
+
+        # Mask some nongermline (CDR) positions
+        mask_labels = torch.zeros(2, 40, dtype=torch.bool)
+        mask_labels[:, 4:7] = True  # HCDR1 positions (nongermline)
+
+        tracker.update(mask_labels, sample_batch_with_nongermline_mask)
+        results = tracker.compute()
+
+        assert "nongermline/fraction_masked" in results
+        assert "nongermline/share_of_total" in results
+        # All masked tokens are nongermline
+        assert results["nongermline/share_of_total"] == 1.0
+
+    def test_germline_nongermline_split(self, sample_batch_with_nongermline_mask):
+        """Test germline and nongermline tracking together."""
+        config = MaskingFrequencyConfig(
+            enabled=True,
+            germline=True,
+            nongermline=True,
+        )
+        tracker = MaskingFrequencyTracker(config)
+
+        # Mask equal amounts from germline and nongermline
+        mask_labels = torch.zeros(2, 40, dtype=torch.bool)
+        mask_labels[:, 1:4] = True   # HFWR1 (3 germline positions)
+        mask_labels[:, 4:7] = True   # HCDR1 (3 nongermline positions)
+
+        tracker.update(mask_labels, sample_batch_with_nongermline_mask)
+        results = tracker.compute()
+
+        # Each should be 50% of total masked
+        assert results["germline/share_of_total"] == pytest.approx(0.5)
+        assert results["nongermline/share_of_total"] == pytest.approx(0.5)
+
+    def test_missing_nongermline_mask_skips_silently(self, sample_batch_with_cdr_mask):
+        """Test that missing non_templated_mask skips germline/nongermline tracking."""
+        config = MaskingFrequencyConfig(
+            enabled=True,
+            germline=True,
+            nongermline=True,
+            hcdr1=True,  # This should still work
+        )
+        tracker = MaskingFrequencyTracker(config)
+
+        # Mask some positions
+        mask_labels = torch.zeros(2, 40, dtype=torch.bool)
+        mask_labels[:, 4:7] = True  # HCDR1
+
+        # batch doesn't have non_templated_mask
+        tracker.update(mask_labels, sample_batch_with_cdr_mask)
+        results = tracker.compute()
+
+        # hcdr1 tracking should work
+        assert "hcdr1/fraction_masked" in results
+        # germline/nongermline should not be present (skipped silently)
+        assert "germline/fraction_masked" not in results
+        assert "nongermline/fraction_masked" not in results

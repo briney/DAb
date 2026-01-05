@@ -27,3 +27,5 @@ all_fwr: true    # Track combined FWR stats (since individuals disabled)
 heavy: false     # Per-chain aggregates disabled
 light: false
 overall: true    # Track overall masking statistics
+germline: true       # Track germline positions (non_templated_mask == 0)
+nongermline: true    # Track non-germline positions (non_templated_mask == 1)

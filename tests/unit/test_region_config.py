@@ -36,6 +36,8 @@ class TestRegionEvalConfig:
         assert config.heavy is False
         assert config.light is False
         assert config.overall is False
+        assert config.germline is False
+        assert config.nongermline is False
 
     def test_custom_config(self):
         """Test config with custom values."""
@@ -116,10 +118,20 @@ class TestRegionEvalConfig:
             heavy=True,
             light=True,
             overall=True,
+            germline=True,
+            nongermline=True,
         )
 
         aggregates = config.get_enabled_aggregates()
-        assert aggregates == {"all_cdr", "all_fwr", "heavy", "light", "overall"}
+        assert aggregates == {
+            "all_cdr",
+            "all_fwr",
+            "heavy",
+            "light",
+            "overall",
+            "germline",
+            "nongermline",
+        }
 
     def test_has_any_enabled_false(self):
         """Test has_any_enabled when nothing is enabled."""
@@ -144,6 +156,50 @@ class TestRegionEvalConfig:
         config = RegionEvalConfig(hcdr3=True, all_cdr=True)
 
         assert config.has_any_enabled() is True
+
+    def test_germline_aggregate(self):
+        """Test germline aggregate configuration."""
+        config = RegionEvalConfig(germline=True)
+
+        assert config.germline is True
+        assert config.has_any_enabled() is True
+        aggregates = config.get_enabled_aggregates()
+        assert "germline" in aggregates
+
+    def test_nongermline_aggregate(self):
+        """Test nongermline aggregate configuration."""
+        config = RegionEvalConfig(nongermline=True)
+
+        assert config.nongermline is True
+        assert config.has_any_enabled() is True
+        aggregates = config.get_enabled_aggregates()
+        assert "nongermline" in aggregates
+
+    def test_germline_nongermline_together(self):
+        """Test germline and nongermline aggregates enabled together."""
+        config = RegionEvalConfig(germline=True, nongermline=True)
+
+        assert config.germline is True
+        assert config.nongermline is True
+        aggregates = config.get_enabled_aggregates()
+        assert "germline" in aggregates
+        assert "nongermline" in aggregates
+
+    def test_germline_with_regions(self):
+        """Test germline aggregate combined with region tracking."""
+        config = RegionEvalConfig(
+            hcdr3=True,
+            lcdr3=True,
+            germline=True,
+            nongermline=True,
+        )
+
+        regions = config.get_enabled_regions()
+        aggregates = config.get_enabled_aggregates()
+
+        assert regions == {"hcdr3", "lcdr3"}
+        assert "germline" in aggregates
+        assert "nongermline" in aggregates
 
 
 class TestBuildRegionEvalConfig:
@@ -188,6 +244,8 @@ class TestBuildRegionEvalConfig:
             "heavy": True,
             "light": True,
             "overall": False,
+            "germline": True,
+            "nongermline": False,
         }
 
         config = build_region_eval_config(cfg_dict)
@@ -202,6 +260,8 @@ class TestBuildRegionEvalConfig:
         assert config.heavy is True
         assert config.light is True
         assert config.overall is False
+        assert config.germline is True
+        assert config.nongermline is False
         assert config.hcdr1 is False
 
     def test_partial_config(self):

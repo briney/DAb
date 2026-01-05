@@ -40,6 +40,10 @@ class MaskingFrequencyConfig:
         Track all light chain regions combined.
     overall
         Track overall masking statistics across all positions.
+    germline
+        Track masking statistics for germline positions (non_templated_mask == 0).
+    nongermline
+        Track masking statistics for nongermline positions (non_templated_mask == 1).
     """
 
     enabled: bool = False
@@ -62,12 +66,14 @@ class MaskingFrequencyConfig:
     lfwr3: bool = False
     lfwr4: bool = False
 
-    # Aggregate groups (5 total)
+    # Aggregate groups (7 total)
     all_cdr: bool = False
     all_fwr: bool = False
     heavy: bool = False
     light: bool = False
     overall: bool = False
+    germline: bool = False
+    nongermline: bool = False
 
 
 # Region name constants for iteration
@@ -88,7 +94,7 @@ _INDIVIDUAL_REGIONS = (
     "lfwr4",
 )
 
-_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall")
+_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall", "germline", "nongermline")
 
 
 class MaskingFrequencyTracker:
@@ -204,6 +210,25 @@ class MaskingFrequencyTracker:
 
         # Track total masked for share_of_total calculation
         self._total_masked += (valid_mask & mask_bool).sum().item()
+
+        # Handle germline/nongermline tracking (position-based, not region-based)
+        non_templated_mask = batch.get("non_templated_mask")
+        if non_templated_mask is not None:
+            if "germline" in enabled_aggregates:
+                if "germline" not in self._region_counts:
+                    self._region_counts["germline"] = {"masked": 0, "total": 0}
+                germline_mask = (non_templated_mask == 0) & valid_mask
+                germline_masked = germline_mask & mask_bool
+                self._region_counts["germline"]["masked"] += germline_masked.sum().item()
+                self._region_counts["germline"]["total"] += germline_mask.sum().item()
+
+            if "nongermline" in enabled_aggregates:
+                if "nongermline" not in self._region_counts:
+                    self._region_counts["nongermline"] = {"masked": 0, "total": 0}
+                nongermline_mask = (non_templated_mask == 1) & valid_mask
+                nongermline_masked = nongermline_mask & mask_bool
+                self._region_counts["nongermline"]["masked"] += nongermline_masked.sum().item()
+                self._region_counts["nongermline"]["total"] += nongermline_mask.sum().item()
 
         # Early exit if no regions need extraction
         if not regions_to_extract:

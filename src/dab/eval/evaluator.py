@@ -544,10 +544,13 @@ class Evaluator:
                 avg_loss = light_acc["total_loss"] / light_acc["count"]
                 results["light/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
 
-        # overall: aggregate all regions
+        # overall: aggregate all regions (excluding germline/nongermline which are position-based)
         if "overall" in enabled_aggs:
             overall_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for acc in region_accumulators.values():
+            for name, acc in region_accumulators.items():
+                # Skip germline/nongermline - they're position-based, not region-based
+                if name in ("germline", "nongermline"):
+                    continue
                 for k in overall_acc:
                     overall_acc[k] += acc[k]
             if overall_acc["count"] > 0:
@@ -556,6 +559,26 @@ class Evaluator:
                 results["overall/prob"] = overall_acc["total_prob"] / overall_acc["count"]
                 avg_loss = overall_acc["total_loss"] / overall_acc["count"]
                 results["overall/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+
+        # germline: already accumulated directly in region_accumulators
+        if "germline" in enabled_aggs and "germline" in region_accumulators:
+            acc = region_accumulators["germline"]
+            if acc["count"] > 0:
+                results["germline/accuracy"] = acc["correct"] / acc["count"]
+                results["germline/loss"] = acc["total_loss"] / acc["count"]
+                results["germline/prob"] = acc["total_prob"] / acc["count"]
+                avg_loss = acc["total_loss"] / acc["count"]
+                results["germline/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+
+        # nongermline: already accumulated directly in region_accumulators
+        if "nongermline" in enabled_aggs and "nongermline" in region_accumulators:
+            acc = region_accumulators["nongermline"]
+            if acc["count"] > 0:
+                results["nongermline/accuracy"] = acc["correct"] / acc["count"]
+                results["nongermline/loss"] = acc["total_loss"] / acc["count"]
+                results["nongermline/prob"] = acc["total_prob"] / acc["count"]
+                avg_loss = acc["total_loss"] / acc["count"]
+                results["nongermline/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
 
         return results
 
@@ -684,6 +707,42 @@ class Evaluator:
                     acc["total_loss"] += region_loss
                     acc["total_prob"] += region_prob
                     acc["count"] += region_total
+
+                # Handle germline/nongermline aggregates (position-based, not region-based)
+                enabled_aggs = config.get_enabled_aggregates()
+                non_templated_mask = batch.get("non_templated_mask")
+                if non_templated_mask is not None:
+                    if "germline" in enabled_aggs:
+                        if "germline" not in region_accumulators:
+                            region_accumulators["germline"] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        germline_mask = (non_templated_mask == 0)
+                        combined = mask & germline_mask
+                        acc = region_accumulators["germline"]
+                        acc["correct"] += ((predictions == targets) & combined).sum().item()
+                        acc["total_loss"] += (loss_per_token * combined.float()).sum().item()
+                        acc["total_prob"] += (target_probs * combined.float()).sum().item()
+                        acc["count"] += combined.sum().item()
+
+                    if "nongermline" in enabled_aggs:
+                        if "nongermline" not in region_accumulators:
+                            region_accumulators["nongermline"] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        nongermline_mask = (non_templated_mask == 1)
+                        combined = mask & nongermline_mask
+                        acc = region_accumulators["nongermline"]
+                        acc["correct"] += ((predictions == targets) & combined).sum().item()
+                        acc["total_loss"] += (loss_per_token * combined.float()).sum().item()
+                        acc["total_prob"] += (target_probs * combined.float()).sum().item()
+                        acc["count"] += combined.sum().item()
 
         # Compute final metrics for enabled individual regions
         results: dict[str, float] = {}
