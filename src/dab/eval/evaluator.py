@@ -711,6 +711,14 @@ class Evaluator:
                 # Handle germline/nongermline aggregates (position-based, not region-based)
                 enabled_aggs = config.get_enabled_aggregates()
                 non_templated_mask = batch.get("non_templated_mask")
+                if non_templated_mask is None:
+                    # Warn once if germline/nongermline tracking enabled but mask missing
+                    if "germline" in enabled_aggs or "nongermline" in enabled_aggs:
+                        warnings.warn(
+                            "germline/nongermline region tracking enabled but non_templated_mask "
+                            "not found in batch. Ensure data has columns matching "
+                            "heavy_nongermline_col and light_nongermline_col config settings."
+                        )
                 if non_templated_mask is not None:
                     if "germline" in enabled_aggs:
                         if "germline" not in region_accumulators:

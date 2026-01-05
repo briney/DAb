@@ -1,3 +1,6 @@
+defaults:
+  - masking_frequency: default
+
 max_steps: 100000
 max_epochs: null
 
@@ -27,6 +30,4 @@ save_best: true
 
 mixed_precision: "no"
 
-# Masking frequency tracking (optional)
-masking_frequency:
-  enabled: false
+# masking_frequency is now composed from train/masking_frequency/default.yaml

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -213,6 +214,14 @@ class MaskingFrequencyTracker:
 
         # Handle germline/nongermline tracking (position-based, not region-based)
         non_templated_mask = batch.get("non_templated_mask")
+        if non_templated_mask is None:
+            # Warn once if germline/nongermline tracking enabled but mask missing
+            if "germline" in enabled_aggregates or "nongermline" in enabled_aggregates:
+                warnings.warn(
+                    "germline/nongermline masking frequency tracking enabled but "
+                    "non_templated_mask not found in batch. Ensure data has columns matching "
+                    "heavy_nongermline_col and light_nongermline_col config settings."
+                )
         if non_templated_mask is not None:
             if "germline" in enabled_aggregates:
                 if "germline" not in self._region_counts:
