@@ -33,6 +33,7 @@ from .base import Metric, MetricBase
 from .evaluator import Evaluator
 from .masking import EvalMasker, create_eval_masker
 from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
+from .region_config import RegionEvalConfig, build_region_eval_config
 from .regions import (
     AntibodyRegion,
     CDR_REGIONS,
@@ -57,6 +58,9 @@ __all__ = [
     # Masking
     "EvalMasker",
     "create_eval_masker",
+    # Region config
+    "RegionEvalConfig",
+    "build_region_eval_config",
     # Regions
     "AntibodyRegion",
     "CDR_REGIONS",

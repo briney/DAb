@@ -133,13 +133,13 @@ class RegionAccuracyMetric(MetricBase):
         """Compute per-region accuracy from accumulated counts.
 
         Returns:
-            Dictionary with "{region_name}_acc" keys.
+            Dictionary with "{region_name}/acc" keys.
         """
         results = {}
         for region_name in self._correct:
             total = self._total[region_name]
             acc = self._correct[region_name] / total if total > 0 else 0.0
-            results[f"{region_name}_acc"] = acc
+            results[f"{region_name}/acc"] = acc
         return results
 
     def reset(self) -> None:
@@ -277,7 +277,7 @@ class RegionPerplexityMetric(MetricBase):
                 ppl = torch.exp(torch.tensor(avg_loss)).item()
             else:
                 ppl = float("inf")
-            results[f"{region_name}_ppl"] = ppl
+            results[f"{region_name}/ppl"] = ppl
         return results
 
     def reset(self) -> None:
@@ -409,7 +409,7 @@ class RegionLossMetric(MetricBase):
         for region_name in self._total_loss:
             tokens = self._total_tokens[region_name]
             avg_loss = self._total_loss[region_name] / tokens if tokens > 0 else float("inf")
-            results[f"{region_name}_loss"] = avg_loss
+            results[f"{region_name}/loss"] = avg_loss
         return results
 
     def reset(self) -> None:

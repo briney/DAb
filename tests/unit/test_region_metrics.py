@@ -94,10 +94,10 @@ class TestRegionAccuracyMetric:
         metric.update(sample_outputs, sample_batch, sample_mask_labels)
         results = metric.compute()
 
-        assert "cdr_acc" in results
-        assert "fwr_acc" in results
-        assert 0.0 <= results["cdr_acc"] <= 1.0
-        assert 0.0 <= results["fwr_acc"] <= 1.0
+        assert "cdr/acc" in results
+        assert "fwr/acc" in results
+        assert 0.0 <= results["cdr/acc"] <= 1.0
+        assert 0.0 <= results["fwr/acc"] <= 1.0
 
     def test_perfect_predictions(self, sample_batch, sample_outputs, sample_mask_labels):
         """Test with perfect predictions."""
@@ -108,7 +108,7 @@ class TestRegionAccuracyMetric:
         results = metric.compute()
 
         # Since outputs predict correct tokens, accuracy should be 1.0
-        assert results["cdr_acc"] == 1.0
+        assert results["cdr/acc"] == 1.0
 
     def test_reset_clears_state(self, sample_batch, sample_outputs, sample_mask_labels):
         """Test that reset clears accumulated state."""
@@ -119,7 +119,7 @@ class TestRegionAccuracyMetric:
 
         results = metric.compute()
         # After reset, should be 0.0 (no data)
-        assert results["cdr_acc"] == 0.0
+        assert results["cdr/acc"] == 0.0
 
     def test_aggregate_by_chain(self, sample_batch, sample_outputs, sample_mask_labels):
         """Test aggregation by chain."""
@@ -129,8 +129,8 @@ class TestRegionAccuracyMetric:
         metric.update(sample_outputs, sample_batch, sample_mask_labels)
         results = metric.compute()
 
-        assert "heavy_acc" in results
-        assert "light_acc" in results
+        assert "heavy/acc" in results
+        assert "light/acc" in results
 
     def test_state_tensors_for_distributed(self, sample_batch, sample_outputs, sample_mask_labels):
         """Test state_tensors and load_state_tensors for distributed training."""
@@ -150,7 +150,7 @@ class TestRegionAccuracyMetric:
 
         # Should recover same results
         results = metric.compute()
-        assert "cdr_acc" in results
+        assert "cdr/acc" in results
 
 
 class TestRegionPerplexityMetric:
@@ -204,11 +204,11 @@ class TestRegionPerplexityMetric:
         metric.update(sample_outputs, sample_batch, sample_mask_labels)
         results = metric.compute()
 
-        assert "cdr_ppl" in results
-        assert "fwr_ppl" in results
+        assert "cdr/ppl" in results
+        assert "fwr/ppl" in results
         # Perplexity should be positive
-        assert results["cdr_ppl"] > 0
-        assert results["fwr_ppl"] > 0
+        assert results["cdr/ppl"] > 0
+        assert results["fwr/ppl"] > 0
 
 
 class TestRegionLossMetric:
@@ -262,8 +262,8 @@ class TestRegionLossMetric:
         metric.update(sample_outputs, sample_batch, sample_mask_labels)
         results = metric.compute()
 
-        assert "cdr_loss" in results
-        assert "fwr_loss" in results
+        assert "cdr/loss" in results
+        assert "fwr/loss" in results
         # Loss should be positive (cross-entropy is always positive)
-        assert results["cdr_loss"] > 0
-        assert results["fwr_loss"] > 0
+        assert results["cdr/loss"] > 0
+        assert results["fwr/loss"] > 0
