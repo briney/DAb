@@ -242,3 +242,163 @@ class TestInformationWeightedMasker:
         mask_counts = mask_labels.sum(dim=-1)
         assert (mask_counts >= 40).all()  # Allow some tolerance
         assert (mask_counts <= 60).all()
+
+
+class TestGumbelSampling:
+    """Tests for Gumbel-top-k selection method."""
+
+    def test_sampled_is_stochastic(self):
+        """Test that sampled selection produces different outputs across runs."""
+        schedule = LinearSchedule(num_timesteps=100)
+        masker = InformationWeightedMasker(
+            noise_schedule=schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        batch_size, seq_len = 2, 50
+        token_ids = torch.randint(4, 28, (batch_size, seq_len))
+        timesteps = torch.tensor([30, 30])
+        attention_mask = torch.ones(batch_size, seq_len)
+        cdr_mask = torch.zeros(batch_size, seq_len)
+        cdr_mask[:, 10:20] = 1  # CDR positions
+
+        # Run multiple times and check for variation
+        results = []
+        for _ in range(10):
+            _, mask_labels = masker.apply_mask(
+                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+            )
+            results.append(mask_labels.clone())
+
+        # Not all results should be identical (stochastic)
+        all_same = all(torch.equal(results[0], r) for r in results[1:])
+        assert not all_same, "Sampled masking should produce different results across runs"
+
+    def test_ranked_is_deterministic(self):
+        """Test that ranked selection produces consistent high-weight position masking."""
+        schedule = LinearSchedule(num_timesteps=100)
+        masker = InformationWeightedMasker(
+            noise_schedule=schedule,
+            cdr_weight_multiplier=10.0,  # Very high weight to ensure CDR always selected first
+            nongermline_weight_multiplier=1.0,
+            selection_method="ranked",
+        )
+
+        batch_size, seq_len = 2, 50
+        token_ids = torch.randint(4, 28, (batch_size, seq_len))
+        timesteps = torch.tensor([10, 10])  # Low mask rate = ~5 positions
+        attention_mask = torch.ones(batch_size, seq_len)
+        cdr_mask = torch.zeros(batch_size, seq_len)
+        cdr_mask[:, 10:20] = 1  # 10 CDR positions (more than we'll mask)
+
+        # Run multiple times - with ranked selection and high CDR weight,
+        # the masked positions should always be within CDR region
+        for _ in range(5):
+            _, mask_labels = masker.apply_mask(
+                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+            )
+            # All masked positions should be CDR positions (10-19)
+            cdr_region = mask_labels[:, 10:20]
+            non_cdr_region = torch.cat([mask_labels[:, :10], mask_labels[:, 20:]], dim=1)
+
+            # With ranked selection and high weight, all masks should be in CDR
+            total_masked = mask_labels.sum()
+            cdr_masked = cdr_region.sum()
+            assert cdr_masked == total_masked, (
+                "Ranked selection with high CDR weight should only mask CDR positions"
+            )
+
+    def test_sampled_respects_weights(self):
+        """Test that higher-weight positions are masked more often on average."""
+        schedule = LinearSchedule(num_timesteps=100)
+        masker = InformationWeightedMasker(
+            noise_schedule=schedule,
+            cdr_weight_multiplier=3.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        batch_size, seq_len = 4, 100
+        token_ids = torch.randint(4, 28, (batch_size, seq_len))
+        timesteps = torch.tensor([15, 15, 15, 15])  # 15% mask rate
+        attention_mask = torch.ones(batch_size, seq_len)
+
+        # CDR at positions 10-20 (10 positions)
+        cdr_mask = torch.zeros(batch_size, seq_len)
+        cdr_mask[:, 10:20] = 1
+
+        # Run multiple trials
+        cdr_mask_counts = []
+        fw_mask_counts = []
+        num_trials = 50
+
+        for _ in range(num_trials):
+            _, mask_labels = masker.apply_mask(
+                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+            )
+            cdr_masked = mask_labels[:, 10:20].sum().item()
+            fw_masked = mask_labels[:, :10].sum().item() + mask_labels[:, 20:].sum().item()
+            cdr_mask_counts.append(cdr_masked)
+            fw_mask_counts.append(fw_masked)
+
+        # CDR has 10 positions with weight 4 (1+3), FW has 90 positions with weight 1
+        # Expected ratio should favor CDR positions
+        avg_cdr = sum(cdr_mask_counts) / num_trials / (10 * batch_size)  # Per position
+        avg_fw = sum(fw_mask_counts) / num_trials / (90 * batch_size)  # Per position
+
+        # CDR should have higher mask rate per position
+        assert avg_cdr > avg_fw, f"CDR rate ({avg_cdr:.3f}) should exceed FW rate ({avg_fw:.3f})"
+
+    def test_sampled_allows_low_weight_positions(self):
+        """Test that framework positions can still be masked with sampled selection."""
+        schedule = LinearSchedule(num_timesteps=100)
+        masker = InformationWeightedMasker(
+            noise_schedule=schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        batch_size, seq_len = 4, 100
+        token_ids = torch.randint(4, 28, (batch_size, seq_len))
+        timesteps = torch.tensor([20, 20, 20, 20])  # 20% mask rate
+        attention_mask = torch.ones(batch_size, seq_len)
+
+        # Small CDR region (only 5 positions)
+        cdr_mask = torch.zeros(batch_size, seq_len)
+        cdr_mask[:, 10:15] = 1
+
+        # With 20% masking of 100 positions = 20 masked positions
+        # Only 5 are CDR, so FW must be masked too
+        fw_masked_ever = False
+        for _ in range(20):
+            _, mask_labels = masker.apply_mask(
+                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+            )
+            # Check if any FW positions (not 10-14) were masked
+            fw_positions = torch.cat([mask_labels[:, :10], mask_labels[:, 15:]], dim=1)
+            if fw_positions.any():
+                fw_masked_ever = True
+                break
+
+        assert fw_masked_ever, "Sampled selection should allow framework positions to be masked"
+
+    def test_selection_method_validation(self):
+        """Test that invalid selection_method raises ValueError."""
+        schedule = LinearSchedule(num_timesteps=100)
+
+        with pytest.raises(ValueError, match="selection_method must be"):
+            InformationWeightedMasker(
+                noise_schedule=schedule,
+                cdr_weight_multiplier=1.0,
+                nongermline_weight_multiplier=1.0,
+                selection_method="invalid",
+            )
+
+    def test_default_selection_method_is_sampled(self):
+        """Test that default selection_method is 'sampled'."""
+        schedule = LinearSchedule(num_timesteps=100)
+        masker = InformationWeightedMasker(noise_schedule=schedule)
+        assert masker.selection_method == "sampled"

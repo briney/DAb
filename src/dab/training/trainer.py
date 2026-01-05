@@ -55,6 +55,7 @@ class TrainingConfig:
     use_information_weighted_masking: bool = True
     cdr_weight_multiplier: float = 1.0
     nongermline_weight_multiplier: float = 1.0
+    masking_selection: str = "sampled"  # "ranked" | "sampled"
 
     # Intervals (in steps)
     log_steps: int = 10
@@ -148,6 +149,7 @@ class Trainer:
             noise_schedule,
             cdr_weight_multiplier=config.cdr_weight_multiplier,
             nongermline_weight_multiplier=config.nongermline_weight_multiplier,
+            selection_method=config.masking_selection,
         )
         self.uniform_masker = UniformMasker(noise_schedule)
 

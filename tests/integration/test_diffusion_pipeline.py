@@ -194,6 +194,136 @@ class TestDiffusionTrainingStep:
 
         assert params_changed
 
+    def test_sampled_masking_forward_loss(self, model, noise_schedule, sample_batch):
+        """Test training step with Gumbel-top-k sampled masking produces valid loss."""
+        torch.manual_seed(42)
+
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        batch_size = sample_batch["token_ids"].shape[0]
+        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+        masked_ids, mask_labels = masker.apply_mask(
+            token_ids=sample_batch["token_ids"],
+            timesteps=timesteps,
+            attention_mask=sample_batch["attention_mask"],
+            cdr_mask=sample_batch["cdr_mask"],
+            special_tokens_mask=sample_batch["special_tokens_mask"],
+        )
+
+        outputs = model(
+            token_ids=masked_ids,
+            chain_ids=sample_batch["chain_ids"],
+            attention_mask=sample_batch["attention_mask"],
+        )
+
+        loss = compute_masked_cross_entropy(
+            logits=outputs["logits"],
+            targets=sample_batch["token_ids"],
+            mask_labels=mask_labels,
+        )
+
+        assert loss.ndim == 0
+        assert loss > 0
+        assert not torch.isnan(loss)
+
+    def test_ranked_masking_forward_loss(self, model, noise_schedule, sample_batch):
+        """Test training step with ranked masking produces valid loss."""
+        torch.manual_seed(42)
+
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="ranked",
+        )
+
+        batch_size = sample_batch["token_ids"].shape[0]
+        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+        masked_ids, mask_labels = masker.apply_mask(
+            token_ids=sample_batch["token_ids"],
+            timesteps=timesteps,
+            attention_mask=sample_batch["attention_mask"],
+            cdr_mask=sample_batch["cdr_mask"],
+            special_tokens_mask=sample_batch["special_tokens_mask"],
+        )
+
+        outputs = model(
+            token_ids=masked_ids,
+            chain_ids=sample_batch["chain_ids"],
+            attention_mask=sample_batch["attention_mask"],
+        )
+
+        loss = compute_masked_cross_entropy(
+            logits=outputs["logits"],
+            targets=sample_batch["token_ids"],
+            mask_labels=mask_labels,
+        )
+
+        assert loss.ndim == 0
+        assert loss > 0
+        assert not torch.isnan(loss)
+
+    @pytest.mark.parametrize("selection_method", ["sampled", "ranked"])
+    def test_selection_method_gradient_update(
+        self, model, noise_schedule, sample_batch, selection_method
+    ):
+        """Test that both selection methods update model parameters correctly."""
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method=selection_method,
+        )
+
+        batch_size = sample_batch["token_ids"].shape[0]
+        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+        initial_params = {
+            name: param.clone() for name, param in model.named_parameters()
+        }
+
+        masked_ids, mask_labels = masker.apply_mask(
+            token_ids=sample_batch["token_ids"],
+            timesteps=timesteps,
+            attention_mask=sample_batch["attention_mask"],
+            cdr_mask=sample_batch["cdr_mask"],
+            special_tokens_mask=sample_batch["special_tokens_mask"],
+        )
+
+        outputs = model(
+            token_ids=masked_ids,
+            chain_ids=sample_batch["chain_ids"],
+            attention_mask=sample_batch["attention_mask"],
+        )
+
+        loss = compute_masked_cross_entropy(
+            logits=outputs["logits"],
+            targets=sample_batch["token_ids"],
+            mask_labels=mask_labels,
+        )
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        params_changed = False
+        for name, param in model.named_parameters():
+            if not torch.allclose(param, initial_params[name]):
+                params_changed = True
+                break
+
+        assert params_changed, f"Parameters should change with {selection_method} selection"
+
 
 class TestDiffusionSampling:
     def test_sampling_pipeline(self, model, noise_schedule, sample_batch):

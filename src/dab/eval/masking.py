@@ -39,6 +39,8 @@ class EvalMasker:
         Weight multiplier for nongermline positions in information-weighted masking.
     seed
         Random seed for reproducibility.
+    selection_method
+        Selection method for information-weighted masking: "ranked" or "sampled".
     """
 
     def __init__(
@@ -50,6 +52,7 @@ class EvalMasker:
         cdr_weight_multiplier: float = 1.0,
         nongermline_weight_multiplier: float = 1.0,
         seed: int = 42,
+        selection_method: str = "sampled",
     ) -> None:
         self.masker_type = masker_type
         self.schedule_type = schedule_type
@@ -58,6 +61,7 @@ class EvalMasker:
         self.cdr_weight_multiplier = cdr_weight_multiplier
         self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.seed = seed
+        self.selection_method = selection_method
 
         # Create noise schedule
         self.noise_schedule = create_schedule(
@@ -78,6 +82,7 @@ class EvalMasker:
                 cdr_weight_multiplier=cdr_weight_multiplier,
                 nongermline_weight_multiplier=nongermline_weight_multiplier,
                 mask_token_id=tokenizer.mask_token_id,
+                selection_method=selection_method,
             )
         else:
             raise ValueError(
@@ -268,9 +273,19 @@ class EvalMasker:
         # Compute weights
         weights = self._masker.compute_weights(cdr_mask, non_templated_mask, maskable_positions)
 
-        # Use seeded random noise
-        noise = torch.rand(weights.shape, device=device, generator=generator) * 1e-6
-        scores = weights + noise
+        # Compute scores based on selection method
+        if self.selection_method == "ranked":
+            # Deterministic top-K selection (small noise only for tie-breaking)
+            noise = torch.rand(weights.shape, device=device, generator=generator) * 1e-6
+            scores = weights + noise
+        else:
+            # Gumbel-top-k: weighted probabilistic sampling without replacement
+            eps = 1e-10
+            uniform = torch.rand(weights.shape, device=device, generator=generator)
+            uniform = uniform.clamp(min=eps, max=1 - eps)
+            gumbel_noise = -torch.log(-torch.log(uniform))
+            scores = torch.log(weights + eps) + gumbel_noise
+
         scores = scores.masked_fill(~maskable_positions.bool(), float("-inf"))
 
         _, indices = scores.sort(dim=-1, descending=True)
@@ -305,6 +320,7 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
         - cdr_weight_multiplier: float (for information_weighted)
         - nongermline_weight_multiplier: float (for information_weighted)
         - seed: int
+        - selection_method: "ranked" or "sampled" (for information_weighted)
 
     Returns
     -------
@@ -319,4 +335,5 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
         cdr_weight_multiplier=cfg.get("cdr_weight_multiplier", 1.0),
         nongermline_weight_multiplier=cfg.get("nongermline_weight_multiplier", 1.0),
         seed=cfg.get("seed", 42),
+        selection_method=cfg.get("selection_method", "sampled"),
     )

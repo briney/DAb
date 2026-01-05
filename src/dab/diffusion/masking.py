@@ -18,6 +18,12 @@ class InformationWeightedMasker:
     - Non-templated CDR positions: 3x base weight (1 + 1 + 1)
     - Templated CDR or non-templated non-CDR: 2x base weight
     - Templated non-CDR (framework): 1x base weight
+
+    Two selection methods are available:
+    - "ranked": Deterministically masks the top-K highest-weighted positions
+    - "sampled": Probabilistically samples positions using Gumbel-top-k,
+                 where higher weights increase selection probability but
+                 don't guarantee selection
     """
 
     def __init__(
@@ -26,11 +32,17 @@ class InformationWeightedMasker:
         cdr_weight_multiplier: float = 1.0,
         nongermline_weight_multiplier: float = 1.0,
         mask_token_id: int = tokenizer.mask_token_id,
+        selection_method: str = "sampled",
     ) -> None:
         self.noise_schedule = noise_schedule
         self.cdr_weight_multiplier = cdr_weight_multiplier
         self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.mask_token_id = mask_token_id
+        if selection_method not in ("ranked", "sampled"):
+            raise ValueError(
+                f"selection_method must be 'ranked' or 'sampled', got {selection_method}"
+            )
+        self.selection_method = selection_method
 
     def compute_weights(
         self,
@@ -83,8 +95,20 @@ class InformationWeightedMasker:
 
         weights = self.compute_weights(cdr_mask, non_templated_mask, maskable_positions)
 
-        noise = torch.rand_like(weights) * 1e-6
-        scores = weights + noise
+        # Compute scores based on selection method
+        if self.selection_method == "ranked":
+            # Deterministic top-K selection (small noise only for tie-breaking)
+            noise = torch.rand_like(weights) * 1e-6
+            scores = weights + noise
+        else:
+            # Gumbel-top-k: weighted probabilistic sampling without replacement
+            # Adding Gumbel noise to log-weights gives proper weighted sampling
+            # See: https://arxiv.org/abs/1903.06059 (Gumbel-Top-k trick)
+            eps = 1e-10
+            uniform = torch.rand_like(weights).clamp(min=eps, max=1 - eps)
+            gumbel_noise = -torch.log(-torch.log(uniform))
+            scores = torch.log(weights + eps) + gumbel_noise
+
         scores = scores.masked_fill(~maskable_positions.bool(), float("-inf"))
 
         _, indices = scores.sort(dim=-1, descending=True)

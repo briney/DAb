@@ -25,6 +25,12 @@ num_timesteps: 100
 cdr_weight_multiplier: 1.0         # Weight boost for CDR positions
 nongermline_weight_multiplier: 1.0  # Weight boost for nongermline positions
 
+# Selection method for information-weighted masking
+# Only used when type=information_weighted
+# - "ranked": Deterministic top-K selection
+# - "sampled": Probabilistic Gumbel-top-k sampling (recommended)
+selection_method: sampled
+
 # Random seed for reproducible masking
 # Same seed + same data = same masked positions
 seed: 42

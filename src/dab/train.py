@@ -231,6 +231,7 @@ def run_training(
         cdr_weight_multiplier=cfg.diffusion.cdr_weight_multiplier,
         nongermline_weight_multiplier=cfg.diffusion.nongermline_weight_multiplier,
         use_information_weighted_masking=cfg.diffusion.use_information_weighted_masking,
+        masking_selection=cfg.diffusion.masking_selection,
         log_steps=cfg.train.log_steps,
         eval_steps=cfg.train.eval_steps,
         checkpoint_steps=cfg.train.checkpoint_steps,

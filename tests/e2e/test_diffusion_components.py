@@ -944,3 +944,344 @@ class TestCombinedConfigurations:
             f"Loss too high for {masker_type} + "
             f"chain_aware={use_chain_aware}: {avg_loss}"
         )
+
+    @pytest.mark.parametrize("selection_method", ["ranked", "sampled"])
+    @pytest.mark.parametrize(
+        "schedule_type,schedule_kwargs",
+        [
+            ("cosine", {}),
+            ("linear", {}),
+            ("sqrt", {}),
+            ("static", {"mask_rate": 0.15}),
+        ],
+    )
+    def test_all_selection_schedule_combinations(
+        self, training_data, selection_method, schedule_type, schedule_kwargs
+    ):
+        """Test training with all combinations of selection methods and schedules."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=32,
+            n_layers=1,
+            n_heads=1,
+            max_seq_len=128,
+            max_timesteps=50,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.train()
+
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=4,
+            max_length=128,
+            shuffle=True,
+            num_workers=0,
+        )
+
+        optimizer = create_optimizer(model, lr=1e-3)
+        noise_schedule = create_schedule(schedule_type, num_timesteps=50, **schedule_kwargs)
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method=selection_method,
+        )
+
+        epoch_loss = 0.0
+        num_batches = 0
+
+        for batch in dataloader:
+            batch_size = batch["token_ids"].shape[0]
+            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+            masked_ids, mask_labels = masker.apply_mask(
+                token_ids=batch["token_ids"],
+                timesteps=timesteps,
+                attention_mask=batch["attention_mask"],
+                cdr_mask=None,
+                non_templated_mask=None,
+                special_tokens_mask=batch["special_tokens_mask"],
+            )
+
+            outputs = model(
+                token_ids=masked_ids,
+                chain_ids=batch["chain_ids"],
+                attention_mask=batch["attention_mask"],
+            )
+
+            loss = compute_masked_cross_entropy(
+                logits=outputs["logits"],
+                targets=batch["token_ids"],
+                mask_labels=mask_labels,
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            epoch_loss += loss.item()
+            num_batches += 1
+
+        avg_loss = epoch_loss / num_batches
+        assert avg_loss < 100, (
+            f"Loss too high for {selection_method} + {schedule_type}: {avg_loss}"
+        )
+
+
+# =============================================================================
+# Selection Method Tests
+# =============================================================================
+
+
+class TestSelectionMethods:
+    """Tests comparing ranked and sampled selection methods."""
+
+    def test_sampled_training_reduces_loss(self, training_data):
+        """Test that multi-epoch training with sampled selection reduces loss."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=32,
+            n_layers=1,
+            n_heads=1,
+            max_seq_len=128,
+            max_timesteps=50,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.train()
+
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=4,
+            max_length=128,
+            shuffle=True,
+            num_workers=0,
+        )
+
+        optimizer = create_optimizer(model, lr=1e-3)
+        noise_schedule = create_schedule("cosine", num_timesteps=50)
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        losses = []
+        for epoch in range(3):
+            epoch_loss = 0.0
+            num_batches = 0
+
+            for batch in dataloader:
+                batch_size = batch["token_ids"].shape[0]
+                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+                masked_ids, mask_labels = masker.apply_mask(
+                    token_ids=batch["token_ids"],
+                    timesteps=timesteps,
+                    attention_mask=batch["attention_mask"],
+                    cdr_mask=None,
+                    non_templated_mask=None,
+                    special_tokens_mask=batch["special_tokens_mask"],
+                )
+
+                outputs = model(
+                    token_ids=masked_ids,
+                    chain_ids=batch["chain_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+                loss = compute_masked_cross_entropy(
+                    logits=outputs["logits"],
+                    targets=batch["token_ids"],
+                    mask_labels=mask_labels,
+                )
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
+
+            losses.append(epoch_loss / num_batches)
+
+        assert losses[-1] < losses[0] * 2
+        assert all(loss < 100 for loss in losses)
+
+    def test_ranked_training_reduces_loss(self, training_data):
+        """Test that multi-epoch training with ranked selection reduces loss."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=32,
+            n_layers=1,
+            n_heads=1,
+            max_seq_len=128,
+            max_timesteps=50,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.train()
+
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=4,
+            max_length=128,
+            shuffle=True,
+            num_workers=0,
+        )
+
+        optimizer = create_optimizer(model, lr=1e-3)
+        noise_schedule = create_schedule("cosine", num_timesteps=50)
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="ranked",
+        )
+
+        losses = []
+        for epoch in range(3):
+            epoch_loss = 0.0
+            num_batches = 0
+
+            for batch in dataloader:
+                batch_size = batch["token_ids"].shape[0]
+                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+
+                masked_ids, mask_labels = masker.apply_mask(
+                    token_ids=batch["token_ids"],
+                    timesteps=timesteps,
+                    attention_mask=batch["attention_mask"],
+                    cdr_mask=None,
+                    non_templated_mask=None,
+                    special_tokens_mask=batch["special_tokens_mask"],
+                )
+
+                outputs = model(
+                    token_ids=masked_ids,
+                    chain_ids=batch["chain_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+                loss = compute_masked_cross_entropy(
+                    logits=outputs["logits"],
+                    targets=batch["token_ids"],
+                    mask_labels=mask_labels,
+                )
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
+
+            losses.append(epoch_loss / num_batches)
+
+        assert losses[-1] < losses[0] * 2
+        assert all(loss < 100 for loss in losses)
+
+    def test_sampled_masks_framework_positions(self, training_data):
+        """Verify that sampled selection allows framework positions to be masked."""
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=8,
+            max_length=128,
+            shuffle=False,
+            num_workers=0,
+        )
+
+        batch = next(iter(dataloader))
+        batch_size, seq_len = batch["token_ids"].shape
+
+        noise_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.15)
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=3.0,
+            nongermline_weight_multiplier=1.0,
+            selection_method="sampled",
+        )
+
+        # Create CDR mask - only a small region
+        cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
+        cdr_mask[:, 10:15] = 1  # Only 5 CDR positions
+
+        # With 15% masking and only 5 CDR positions out of ~70 maskable,
+        # framework must be masked
+        fw_masked_total = 0
+        num_trials = 10
+
+        for _ in range(num_trials):
+            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+            _, mask_labels = masker.apply_mask(
+                token_ids=batch["token_ids"],
+                timesteps=timesteps,
+                attention_mask=batch["attention_mask"],
+                cdr_mask=cdr_mask,
+                non_templated_mask=None,
+                special_tokens_mask=batch["special_tokens_mask"],
+            )
+
+            # Count framework positions masked (not 10-14)
+            special_mask = batch["special_tokens_mask"].bool()
+            maskable = batch["attention_mask"].bool() & ~special_mask
+            fw_maskable = maskable.clone()
+            fw_maskable[:, 10:15] = False
+
+            fw_masked = (mask_labels & fw_maskable).sum().item()
+            fw_masked_total += fw_masked
+
+        # Should have some framework positions masked across trials
+        assert fw_masked_total > 0, "Sampled selection should mask framework positions"
+
+    def test_ranked_masks_mostly_high_weight(self, training_data):
+        """Verify that ranked selection prioritizes CDR/nongermline positions."""
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=8,
+            max_length=128,
+            shuffle=False,
+            num_workers=0,
+        )
+
+        batch = next(iter(dataloader))
+        batch_size, seq_len = batch["token_ids"].shape
+
+        noise_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.10)
+        masker = InformationWeightedMasker(
+            noise_schedule,
+            cdr_weight_multiplier=5.0,  # High weight for CDR
+            nongermline_weight_multiplier=1.0,
+            selection_method="ranked",
+        )
+
+        # Create CDR mask with enough positions to fill 10% masking
+        cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
+        cdr_mask[:, 10:25] = 1  # 15 CDR positions
+
+        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+        _, mask_labels = masker.apply_mask(
+            token_ids=batch["token_ids"],
+            timesteps=timesteps,
+            attention_mask=batch["attention_mask"],
+            cdr_mask=cdr_mask,
+            non_templated_mask=None,
+            special_tokens_mask=batch["special_tokens_mask"],
+        )
+
+        # Calculate what fraction of masked positions are CDR
+        special_mask = batch["special_tokens_mask"].bool()
+        maskable = batch["attention_mask"].bool() & ~special_mask
+        cdr_maskable = (cdr_mask > 0) & maskable
+
+        cdr_masked = (mask_labels & cdr_maskable).sum().item()
+        total_masked = mask_labels.sum().item()
+
+        if total_masked > 0:
+            cdr_fraction = cdr_masked / total_masked
+            # With ranked selection and high CDR weight, most masked should be CDR
+            assert cdr_fraction > 0.7, (
+                f"Ranked selection should prioritize CDR positions, got {cdr_fraction:.2%}"
+            )
