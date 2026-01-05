@@ -14,6 +14,7 @@ from tqdm import tqdm
 from ..diffusion import InformationWeightedMasker, NoiseSchedule, UniformMasker
 from ..model import DAbModel
 from .checkpoint import CheckpointConfig, CheckpointManager
+from .flops import FLOPsConfig, FLOPsTracker
 from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
 from .metrics import (
     DiffusionMetrics,
@@ -89,6 +90,7 @@ class Trainer:
         evaluator: "Evaluator | None" = None,
         accelerator: Accelerator | None = None,
         masking_frequency_config: MaskingFrequencyConfig | None = None,
+        flops_config: FLOPsConfig | None = None,
     ) -> None:
         self.config = config
 
@@ -178,6 +180,14 @@ class Trainer:
         self.masking_frequency_config = masking_frequency_config or MaskingFrequencyConfig()
         self.masking_frequency_tracker = MaskingFrequencyTracker(self.masking_frequency_config)
         self.eval_masking_frequency_trackers: dict[str, MaskingFrequencyTracker] = {}
+
+        # FLOPs tracking
+        self.flops_config = flops_config or FLOPsConfig()
+        self.flops_tracker = FLOPsTracker(
+            config=self.flops_config,
+            model_config=self.accelerator.unwrap_model(self.model).config,
+            world_size=self.accelerator.num_processes,
+        )
 
     def set_logger(self, logger) -> None:
         """Set the logger for training metrics."""
@@ -392,6 +402,9 @@ class Trainer:
         )
         progress_bar.update(self.global_step)
 
+        # Start FLOPs timing
+        self.flops_tracker.start_timing()
+
         while self.global_step < total_steps:
             for batch in self.train_dataloader:
                 with self.accelerator.accumulate(self.model):
@@ -417,6 +430,13 @@ class Trainer:
                     self.metrics.update("train/accuracy", step_metrics.accuracy)
                     self.metrics.update("train/perplexity", step_metrics.perplexity)
 
+                    # Update FLOPs tracking
+                    batch_size = batch["token_ids"].shape[0]
+                    seq_len = batch["token_ids"].shape[1]
+                    self.flops_tracker.update(batch_size, seq_len)
+                    self.flops_tracker.mark_step_end()
+                    self.flops_tracker.start_timing()
+
                     # Pre-compute conditions for this step
                     should_log = self.global_step % self.config.log_steps == 0
                     should_eval = (
@@ -439,6 +459,11 @@ class Trainer:
                         masking_freq = self.masking_frequency_tracker.compute()
                         for key, value in masking_freq.items():
                             log_metrics[f"train/masking_frequency/{key}"] = value
+
+                        # Add FLOPs metrics
+                        flops_metrics = self.flops_tracker.compute()
+                        for key, value in flops_metrics.items():
+                            log_metrics[f"train/{key}"] = value
 
                         if self.logger is not None:
                             # Use commit=False if eval will also log at this step

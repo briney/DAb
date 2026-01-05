@@ -16,7 +16,7 @@ from .diffusion import create_schedule
 from .eval import Evaluator
 from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
-from .training import MaskingFrequencyConfig, Trainer, TrainingConfig
+from .training import FLOPsConfig, MaskingFrequencyConfig, Trainer, TrainingConfig
 from .utils import set_seed
 
 
@@ -122,6 +122,23 @@ def _build_masking_frequency_config(cfg: DictConfig) -> MaskingFrequencyConfig:
             config_kwargs[field_name] = mf_cfg[field_name]
 
     return MaskingFrequencyConfig(**config_kwargs)
+
+
+def _build_flops_config(cfg: DictConfig) -> FLOPsConfig:
+    """Build FLOPsConfig from Hydra config.
+
+    Parameters
+    ----------
+    cfg
+        Full Hydra configuration.
+
+    Returns
+    -------
+    FLOPsConfig
+        FLOPs tracking configuration.
+    """
+    flops_cfg = cfg.train.get("flops", {})
+    return FLOPsConfig(enabled=flops_cfg.get("enabled", True))
 
 
 def run_training(
@@ -271,6 +288,9 @@ def run_training(
     # Build masking frequency config
     masking_frequency_config = _build_masking_frequency_config(cfg)
 
+    # Build FLOPs tracking config
+    flops_config = _build_flops_config(cfg)
+
     # Create trainer with pre-created accelerator
     trainer = Trainer(
         config=training_config,
@@ -280,6 +300,7 @@ def run_training(
         noise_schedule=noise_schedule,
         accelerator=accelerator,
         masking_frequency_config=masking_frequency_config,
+        flops_config=flops_config,
     )
 
     # Create evaluator for advanced metrics (including region-based eval)
