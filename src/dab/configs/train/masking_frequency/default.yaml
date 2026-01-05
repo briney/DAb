@@ -27,5 +27,5 @@ all_fwr: true   # Combined stats for all 8 frameworks
 heavy: true     # All heavy chain regions
 light: true     # All light chain regions
 overall: true   # Total masking statistics
-germline: false      # Germline positions (non_templated_mask == 0)
-nongermline: false   # Non-germline positions (non_templated_mask == 1)
+germline: true      # Germline positions (non_templated_mask == 0)
+nongermline: true   # Non-germline positions (non_templated_mask == 1)
