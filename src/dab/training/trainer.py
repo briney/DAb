@@ -402,9 +402,6 @@ class Trainer:
         )
         progress_bar.update(self.global_step)
 
-        # Start FLOPs timing
-        self.flops_tracker.start_timing()
-
         while self.global_step < total_steps:
             for batch in self.train_dataloader:
                 with self.accelerator.accumulate(self.model):
@@ -434,8 +431,6 @@ class Trainer:
                     batch_size = batch["token_ids"].shape[0]
                     seq_len = batch["token_ids"].shape[1]
                     self.flops_tracker.update(batch_size, seq_len)
-                    self.flops_tracker.mark_step_end()
-                    self.flops_tracker.start_timing()
 
                     # Pre-compute conditions for this step
                     should_log = self.global_step % self.config.log_steps == 0
