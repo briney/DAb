@@ -16,7 +16,7 @@ from .diffusion import create_schedule
 from .eval import Evaluator
 from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
-from .training import Trainer, TrainingConfig
+from .training import MaskingFrequencyConfig, Trainer, TrainingConfig
 from .utils import set_seed
 
 
@@ -96,6 +96,32 @@ def _load_config(
             override_list.append(f"output_dir={output_dir}")
 
         return compose(config_name=config_name, overrides=override_list)
+
+
+def _build_masking_frequency_config(cfg: DictConfig) -> MaskingFrequencyConfig:
+    """Build MaskingFrequencyConfig from Hydra config.
+
+    Parameters
+    ----------
+    cfg
+        Full Hydra configuration.
+
+    Returns
+    -------
+    MaskingFrequencyConfig
+        Masking frequency configuration for the tracker.
+    """
+    mf_cfg = cfg.train.get("masking_frequency", {})
+    if not mf_cfg:
+        return MaskingFrequencyConfig()
+
+    # Build config from available fields
+    config_kwargs = {}
+    for field_name in MaskingFrequencyConfig.__dataclass_fields__:
+        if field_name in mf_cfg:
+            config_kwargs[field_name] = mf_cfg[field_name]
+
+    return MaskingFrequencyConfig(**config_kwargs)
 
 
 def run_training(
@@ -242,6 +268,9 @@ def run_training(
         mixed_precision=cfg.train.mixed_precision,
     )
 
+    # Build masking frequency config
+    masking_frequency_config = _build_masking_frequency_config(cfg)
+
     # Create trainer with pre-created accelerator
     trainer = Trainer(
         config=training_config,
@@ -250,6 +279,7 @@ def run_training(
         eval_dataloaders=eval_dataloaders if eval_dataloaders else None,
         noise_schedule=noise_schedule,
         accelerator=accelerator,
+        masking_frequency_config=masking_frequency_config,
     )
 
     # Create evaluator for advanced metrics (including region-based eval)

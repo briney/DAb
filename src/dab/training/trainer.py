@@ -14,6 +14,7 @@ from tqdm import tqdm
 from ..diffusion import InformationWeightedMasker, NoiseSchedule, UniformMasker
 from ..model import DAbModel
 from .checkpoint import CheckpointConfig, CheckpointManager
+from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
 from .metrics import (
     DiffusionMetrics,
     MetricAccumulator,
@@ -87,6 +88,7 @@ class Trainer:
         noise_schedule: NoiseSchedule | None = None,
         evaluator: "Evaluator | None" = None,
         accelerator: Accelerator | None = None,
+        masking_frequency_config: MaskingFrequencyConfig | None = None,
     ) -> None:
         self.config = config
 
@@ -172,6 +174,11 @@ class Trainer:
         self.steps_per_epoch = len(self.train_dataloader)
         self.logger = None
 
+        # Masking frequency tracking
+        self.masking_frequency_config = masking_frequency_config or MaskingFrequencyConfig()
+        self.masking_frequency_tracker = MaskingFrequencyTracker(self.masking_frequency_config)
+        self.eval_masking_frequency_trackers: dict[str, MaskingFrequencyTracker] = {}
+
     def set_logger(self, logger) -> None:
         """Set the logger for training metrics."""
         self.logger = logger
@@ -221,6 +228,9 @@ class Trainer:
             Tuple of (loss tensor for backprop, DiffusionMetrics with all metrics).
         """
         mask_output = self._apply_masking(batch)
+
+        # Track masking frequency
+        self.masking_frequency_tracker.update(mask_output["mask_labels"], batch)
 
         outputs = self.model(
             token_ids=mask_output["masked_ids"],
@@ -299,6 +309,8 @@ class Trainer:
 
         if self.evaluator is not None:
             # Use advanced evaluator
+            # Note: masking frequency tracking is handled in simple eval path only.
+            # Advanced evaluator does its own masking internally.
             return self.evaluator.evaluate_all(
                 self.eval_dataloaders,
                 masker=self.uniform_masker,
@@ -311,12 +323,23 @@ class Trainer:
         for eval_name, eval_loader in self.eval_dataloaders.items():
             eval_metrics = MetricAccumulator()
 
+            # Get or create masking frequency tracker for this eval dataset
+            if eval_name not in self.eval_masking_frequency_trackers:
+                self.eval_masking_frequency_trackers[eval_name] = MaskingFrequencyTracker(
+                    self.masking_frequency_config
+                )
+            eval_tracker = self.eval_masking_frequency_trackers[eval_name]
+            eval_tracker.reset()
+
             for batch in tqdm(
                 eval_loader,
                 desc=f"Eval ({eval_name})",
                 disable=not self.accelerator.is_local_main_process,
             ):
                 mask_output = self._apply_masking(batch)
+
+                # Track masking frequency for eval
+                eval_tracker.update(mask_output["mask_labels"], batch)
 
                 outputs = self.model(
                     token_ids=mask_output["masked_ids"],
@@ -340,6 +363,11 @@ class Trainer:
                 "accuracy": eval_metrics.compute("accuracy"),
                 "perplexity": eval_metrics.compute("perplexity"),
             }
+
+            # Add masking frequency metrics
+            masking_freq = eval_tracker.compute()
+            for key, value in masking_freq.items():
+                all_results[eval_name][f"masking_frequency/{key}"] = value
 
         self.model.train()
         return all_results
@@ -407,6 +435,11 @@ class Trainer:
                         log_metrics["epoch"] = self.epoch
                         log_metrics["step"] = self.global_step
 
+                        # Add masking frequency metrics
+                        masking_freq = self.masking_frequency_tracker.compute()
+                        for key, value in masking_freq.items():
+                            log_metrics[f"train/masking_frequency/{key}"] = value
+
                         if self.logger is not None:
                             # Use commit=False if eval will also log at this step
                             # to avoid wandb non-monotonic step warnings
@@ -417,6 +450,7 @@ class Trainer:
                             )
 
                         self.metrics.reset()
+                        self.masking_frequency_tracker.reset()
 
                     # Evaluation
                     if should_eval:

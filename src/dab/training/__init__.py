@@ -1,6 +1,7 @@
 """Training infrastructure for DAb."""
 
 from .checkpoint import CheckpointConfig, CheckpointManager
+from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
 from .metrics import (
     DiffusionMetrics,
     MetricAccumulator,
@@ -16,6 +17,9 @@ __all__ = [
     # Checkpoint
     "CheckpointConfig",
     "CheckpointManager",
+    # Masking frequency tracking
+    "MaskingFrequencyConfig",
+    "MaskingFrequencyTracker",
     # Metrics
     "MetricAccumulator",
     "DiffusionMetrics",
