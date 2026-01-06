@@ -234,6 +234,7 @@ def run_training(
         dropout=cfg.model.dropout,
         attention_dropout=cfg.model.attention_dropout,
         embedding_dropout=cfg.model.embedding_dropout,
+        use_chain_aware_attention=cfg.model.use_chain_aware_attention,
     )
     model = DAbModel(model_config)
     accelerator.print(f"Model parameters: {model.get_num_params():,}")
