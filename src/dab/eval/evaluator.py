@@ -246,6 +246,7 @@ class Evaluator:
                     mask_labels = self._create_eval_mask(batch, device)
                     masked_ids = batch["token_ids"].clone()
                     from ..tokenizer import tokenizer
+
                     masked_ids[mask_labels.bool()] = tokenizer.mask_token_id
 
                 # Forward pass
@@ -401,17 +402,12 @@ class Evaluator:
 
         if mode == "standard":
             return self._run_standard_eval(
-                eval_loader, eval_name, regions, config,
-                mask_labels_cache, batch_cache
+                eval_loader, eval_name, regions, config, mask_labels_cache, batch_cache
             )
         elif mode in ("per_position", "per-position"):
-            return self._run_per_position_eval(
-                eval_loader, regions, position_batch_size, config
-            )
+            return self._run_per_position_eval(eval_loader, regions, position_batch_size, config)
         else:  # region_level or region-level
-            return self._run_region_level_eval(
-                eval_loader, regions, config
-            )
+            return self._run_region_level_eval(eval_loader, regions, config)
 
     def _get_regions_for_aggregates(
         self,
@@ -430,23 +426,43 @@ class Evaluator:
 
         # CDR regions
         cdr_regions = {
-            AntibodyRegion.HCDR1, AntibodyRegion.HCDR2, AntibodyRegion.HCDR3,
-            AntibodyRegion.LCDR1, AntibodyRegion.LCDR2, AntibodyRegion.LCDR3,
+            AntibodyRegion.HCDR1,
+            AntibodyRegion.HCDR2,
+            AntibodyRegion.HCDR3,
+            AntibodyRegion.LCDR1,
+            AntibodyRegion.LCDR2,
+            AntibodyRegion.LCDR3,
         }
         # FWR regions
         fwr_regions = {
-            AntibodyRegion.HFWR1, AntibodyRegion.HFWR2, AntibodyRegion.HFWR3, AntibodyRegion.HFWR4,
-            AntibodyRegion.LFWR1, AntibodyRegion.LFWR2, AntibodyRegion.LFWR3, AntibodyRegion.LFWR4,
+            AntibodyRegion.HFWR1,
+            AntibodyRegion.HFWR2,
+            AntibodyRegion.HFWR3,
+            AntibodyRegion.HFWR4,
+            AntibodyRegion.LFWR1,
+            AntibodyRegion.LFWR2,
+            AntibodyRegion.LFWR3,
+            AntibodyRegion.LFWR4,
         }
         # Heavy chain regions
         heavy_regions = {
-            AntibodyRegion.HCDR1, AntibodyRegion.HCDR2, AntibodyRegion.HCDR3,
-            AntibodyRegion.HFWR1, AntibodyRegion.HFWR2, AntibodyRegion.HFWR3, AntibodyRegion.HFWR4,
+            AntibodyRegion.HCDR1,
+            AntibodyRegion.HCDR2,
+            AntibodyRegion.HCDR3,
+            AntibodyRegion.HFWR1,
+            AntibodyRegion.HFWR2,
+            AntibodyRegion.HFWR3,
+            AntibodyRegion.HFWR4,
         }
         # Light chain regions
         light_regions = {
-            AntibodyRegion.LCDR1, AntibodyRegion.LCDR2, AntibodyRegion.LCDR3,
-            AntibodyRegion.LFWR1, AntibodyRegion.LFWR2, AntibodyRegion.LFWR3, AntibodyRegion.LFWR4,
+            AntibodyRegion.LCDR1,
+            AntibodyRegion.LCDR2,
+            AntibodyRegion.LCDR3,
+            AntibodyRegion.LFWR1,
+            AntibodyRegion.LFWR2,
+            AntibodyRegion.LFWR3,
+            AntibodyRegion.LFWR4,
         }
 
         if "all_cdr" in enabled_aggs:
@@ -497,8 +513,14 @@ class Evaluator:
         if "all_fwr" in enabled_aggs:
             fwr_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
             for region_name in [
-                "hfwr1", "hfwr2", "hfwr3", "hfwr4",
-                "lfwr1", "lfwr2", "lfwr3", "lfwr4"
+                "hfwr1",
+                "hfwr2",
+                "hfwr3",
+                "hfwr4",
+                "lfwr1",
+                "lfwr2",
+                "lfwr3",
+                "lfwr4",
             ]:
                 if region_name in region_accumulators:
                     for k in fwr_acc:
@@ -513,10 +535,7 @@ class Evaluator:
         # heavy: aggregate all heavy chain regions
         if "heavy" in enabled_aggs:
             heavy_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in [
-                "hcdr1", "hcdr2", "hcdr3",
-                "hfwr1", "hfwr2", "hfwr3", "hfwr4"
-            ]:
+            for region_name in ["hcdr1", "hcdr2", "hcdr3", "hfwr1", "hfwr2", "hfwr3", "hfwr4"]:
                 if region_name in region_accumulators:
                     for k in heavy_acc:
                         heavy_acc[k] += region_accumulators[region_name][k]
@@ -530,10 +549,7 @@ class Evaluator:
         # light: aggregate all light chain regions
         if "light" in enabled_aggs:
             light_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in [
-                "lcdr1", "lcdr2", "lcdr3",
-                "lfwr1", "lfwr2", "lfwr3", "lfwr4"
-            ]:
+            for region_name in ["lcdr1", "lcdr2", "lcdr3", "lfwr1", "lfwr2", "lfwr3", "lfwr4"]:
                 if region_name in region_accumulators:
                     for k in light_acc:
                         light_acc[k] += region_accumulators[region_name][k]
@@ -627,9 +643,7 @@ class Evaluator:
         self.model.eval()
         with torch.no_grad():
             for batch in tqdm(
-                eval_loader,
-                desc="Region eval (standard)",
-                disable=not self._show_progress()
+                eval_loader, desc="Region eval (standard)", disable=not self._show_progress()
             ):
                 # Move batch to device if not using accelerator
                 if self.accelerator is None:
@@ -652,6 +666,7 @@ class Evaluator:
                     mask_labels = self._create_eval_mask(batch, device)
                     masked_ids = batch["token_ids"].clone()
                     from ..tokenizer import tokenizer
+
                     masked_ids[mask_labels.bool()] = tokenizer.mask_token_id
 
                 # Forward pass
@@ -679,7 +694,9 @@ class Evaluator:
 
                 # Extract region masks
                 try:
-                    target_regions = all_regions_needed if all_regions_needed else set(AntibodyRegion)
+                    target_regions = (
+                        all_regions_needed if all_regions_needed else set(AntibodyRegion)
+                    )
                     region_masks = extract_region_masks(batch, target_regions)
                 except ValueError:
                     continue
@@ -728,7 +745,7 @@ class Evaluator:
                                 "total_prob": 0.0,
                                 "count": 0,
                             }
-                        germline_mask = (non_templated_mask == 0)
+                        germline_mask = non_templated_mask == 0
                         combined = mask & germline_mask
                         acc = region_accumulators["germline"]
                         acc["correct"] += ((predictions == targets) & combined).sum().item()
@@ -744,7 +761,7 @@ class Evaluator:
                                 "total_prob": 0.0,
                                 "count": 0,
                             }
-                        nongermline_mask = (non_templated_mask == 1)
+                        nongermline_mask = non_templated_mask == 1
                         combined = mask & nongermline_mask
                         acc = region_accumulators["nongermline"]
                         acc["correct"] += ((predictions == targets) & combined).sum().item()
@@ -777,6 +794,10 @@ class Evaluator:
     ) -> dict[str, float]:
         """Run per-position region evaluation.
 
+        This method is optimized to collect all unique positions needed
+        for evaluation upfront, run inference once, and aggregate results
+        multiple ways (by region, germline, nongermline).
+
         Args:
             eval_loader: DataLoader for the evaluation dataset.
             regions: Set of regions to evaluate, or None for all.
@@ -786,6 +807,8 @@ class Evaluator:
         Returns:
             Dictionary mapping region metric names to values.
         """
+        from .regions import extract_region_masks
+
         device = _get_model_device(self.model, self.accelerator)
         evaluator = PerPositionEvaluator(
             model=self.model,
@@ -810,45 +833,43 @@ class Evaluator:
         self.model.eval()
         with torch.no_grad():
             for batch in tqdm(
-                eval_loader,
-                desc="Region eval (per-position)",
-                disable=not self._show_progress()
+                eval_loader, desc="Region eval (per-position)", disable=not self._show_progress()
             ):
                 # Process each sample in the batch individually
                 batch_size = batch["token_ids"].shape[0]
                 for i in range(batch_size):
                     # Extract single sample
                     sample = {
-                        k: v[i] if isinstance(v, torch.Tensor) else v
-                        for k, v in batch.items()
+                        k: v[i] if isinstance(v, torch.Tensor) else v for k, v in batch.items()
                     }
 
-                    # Evaluate by region
+                    # === OPTIMIZED: Collect all positions upfront ===
+                    # 1. Extract region masks to get positions per region
+                    batch_sample = {
+                        k: v.unsqueeze(0) if isinstance(v, torch.Tensor) else v
+                        for k, v in sample.items()
+                    }
+
                     try:
                         target_regions = all_regions_needed if all_regions_needed else None
-                        sample_results = evaluator.evaluate_by_region(sample, target_regions)
-                    except Exception as e:
-                        warnings.warn(f"Region evaluation failed for sample: {e}")
+                        region_masks = extract_region_masks(batch_sample, target_regions)
+                    except (ValueError, KeyError) as e:
+                        warnings.warn(f"Region mask extraction failed for sample: {e}")
                         continue
 
-                    # Accumulate results
-                    for region_name, metrics in sample_results.items():
-                        if region_name not in region_accumulators:
-                            region_accumulators[region_name] = {
-                                "correct": 0,
-                                "total_loss": 0.0,
-                                "total_prob": 0.0,
-                                "count": 0,
-                            }
-                        acc = region_accumulators[region_name]
-                        count = metrics.get("count", 0)
-                        if count > 0:
-                            acc["correct"] += metrics["accuracy"] * count
-                            acc["total_loss"] += metrics["avg_loss"] * count
-                            acc["total_prob"] += metrics["avg_prob"] * count
-                            acc["count"] += count
+                    # Build position-to-region mapping and collect all region positions
+                    region_positions: dict[str, list[int]] = {}
+                    all_positions_needed: set[int] = set()
 
-                    # Handle germline/nongermline aggregates (position-based)
+                    for region, mask in region_masks.items():
+                        positions = mask[0].nonzero(as_tuple=True)[0].tolist()
+                        region_positions[region.value] = positions
+                        all_positions_needed.update(positions)
+
+                    # 2. Extract germline/nongermline positions
+                    germline_positions: list[int] = []
+                    nongermline_positions: list[int] = []
+
                     if needs_germline or needs_nongermline:
                         non_templated_mask = sample.get("non_templated_mask")
                         if non_templated_mask is None:
@@ -864,65 +885,98 @@ class Evaluator:
                             # Get valid positions (exclude special tokens and padding)
                             attention_mask = sample.get("attention_mask")
                             special_tokens_mask = sample.get("special_tokens_mask")
-                            valid_mask = attention_mask.bool() if attention_mask is not None else None
+                            valid_mask = (
+                                attention_mask.bool() if attention_mask is not None else None
+                            )
                             if valid_mask is not None and special_tokens_mask is not None:
                                 valid_mask = valid_mask & ~special_tokens_mask.bool()
 
-                            # Evaluate germline positions
                             if needs_germline:
-                                germline_mask = (non_templated_mask == 0)
+                                germline_mask = non_templated_mask == 0
                                 if valid_mask is not None:
                                     germline_mask = germline_mask & valid_mask
-                                germline_positions = germline_mask.nonzero(as_tuple=True)[0].tolist()
+                                germline_positions = germline_mask.nonzero(as_tuple=True)[
+                                    0
+                                ].tolist()
+                                all_positions_needed.update(germline_positions)
 
-                                if germline_positions:
-                                    try:
-                                        germline_results = evaluator.evaluate_positions(
-                                            sample, germline_positions
-                                        )
-                                        if "germline" not in region_accumulators:
-                                            region_accumulators["germline"] = {
-                                                "correct": 0,
-                                                "total_loss": 0.0,
-                                                "total_prob": 0.0,
-                                                "count": 0,
-                                            }
-                                        acc = region_accumulators["germline"]
-                                        for pos, metrics in germline_results.items():
-                                            acc["correct"] += metrics["correct"]
-                                            acc["total_loss"] += metrics["loss"]
-                                            acc["total_prob"] += metrics["prob"]
-                                            acc["count"] += 1
-                                    except Exception as e:
-                                        warnings.warn(f"Germline evaluation failed: {e}")
-
-                            # Evaluate nongermline positions
                             if needs_nongermline:
-                                nongermline_mask = (non_templated_mask == 1)
+                                nongermline_mask = non_templated_mask == 1
                                 if valid_mask is not None:
                                     nongermline_mask = nongermline_mask & valid_mask
-                                nongermline_positions = nongermline_mask.nonzero(as_tuple=True)[0].tolist()
+                                nongermline_positions = nongermline_mask.nonzero(as_tuple=True)[
+                                    0
+                                ].tolist()
+                                all_positions_needed.update(nongermline_positions)
 
-                                if nongermline_positions:
-                                    try:
-                                        nongermline_results = evaluator.evaluate_positions(
-                                            sample, nongermline_positions
-                                        )
-                                        if "nongermline" not in region_accumulators:
-                                            region_accumulators["nongermline"] = {
-                                                "correct": 0,
-                                                "total_loss": 0.0,
-                                                "total_prob": 0.0,
-                                                "count": 0,
-                                            }
-                                        acc = region_accumulators["nongermline"]
-                                        for pos, metrics in nongermline_results.items():
-                                            acc["correct"] += metrics["correct"]
-                                            acc["total_loss"] += metrics["loss"]
-                                            acc["total_prob"] += metrics["prob"]
-                                            acc["count"] += 1
-                                    except Exception as e:
-                                        warnings.warn(f"Nongermline evaluation failed: {e}")
+                    # Skip if no positions to evaluate
+                    if not all_positions_needed:
+                        continue
+
+                    # 3. Evaluate ALL positions ONCE
+                    try:
+                        per_position_results = evaluator.evaluate_positions(
+                            sample, list(all_positions_needed)
+                        )
+                    except Exception as e:
+                        warnings.warn(f"Per-position evaluation failed for sample: {e}")
+                        continue
+
+                    # 4. Aggregate by region
+                    for region_name, positions in region_positions.items():
+                        if not positions:
+                            continue
+                        if region_name not in region_accumulators:
+                            region_accumulators[region_name] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        acc = region_accumulators[region_name]
+                        for pos in positions:
+                            if pos in per_position_results:
+                                metrics = per_position_results[pos]
+                                acc["correct"] += metrics["correct"]
+                                acc["total_loss"] += metrics["loss"]
+                                acc["total_prob"] += metrics["prob"]
+                                acc["count"] += 1
+
+                    # 5. Aggregate by germline
+                    if germline_positions:
+                        if "germline" not in region_accumulators:
+                            region_accumulators["germline"] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        acc = region_accumulators["germline"]
+                        for pos in germline_positions:
+                            if pos in per_position_results:
+                                metrics = per_position_results[pos]
+                                acc["correct"] += metrics["correct"]
+                                acc["total_loss"] += metrics["loss"]
+                                acc["total_prob"] += metrics["prob"]
+                                acc["count"] += 1
+
+                    # 6. Aggregate by nongermline
+                    if nongermline_positions:
+                        if "nongermline" not in region_accumulators:
+                            region_accumulators["nongermline"] = {
+                                "correct": 0,
+                                "total_loss": 0.0,
+                                "total_prob": 0.0,
+                                "count": 0,
+                            }
+                        acc = region_accumulators["nongermline"]
+                        for pos in nongermline_positions:
+                            if pos in per_position_results:
+                                metrics = per_position_results[pos]
+                                acc["correct"] += metrics["correct"]
+                                acc["total_loss"] += metrics["loss"]
+                                acc["total_prob"] += metrics["prob"]
+                                acc["count"] += 1
 
         # Compute final metrics for enabled individual regions
         results: dict[str, float] = {}
@@ -975,17 +1029,14 @@ class Evaluator:
         self.model.eval()
         with torch.no_grad():
             for batch in tqdm(
-                eval_loader,
-                desc="Region eval (region-level)",
-                disable=not self._show_progress()
+                eval_loader, desc="Region eval (region-level)", disable=not self._show_progress()
             ):
                 # Process each sample in the batch individually
                 batch_size = batch["token_ids"].shape[0]
                 for i in range(batch_size):
                     # Extract single sample
                     sample = {
-                        k: v[i] if isinstance(v, torch.Tensor) else v
-                        for k, v in batch.items()
+                        k: v[i] if isinstance(v, torch.Tensor) else v for k, v in batch.items()
                     }
 
                     # Evaluate all regions
@@ -1052,6 +1103,7 @@ class Evaluator:
                                     try:
                                         # Mask all germline positions
                                         from ..tokenizer import tokenizer
+
                                         masked_ids = token_ids.clone()
                                         masked_ids[germline_mask] = tokenizer.mask_token_id
 
@@ -1096,6 +1148,7 @@ class Evaluator:
                                     try:
                                         # Mask all nongermline positions
                                         from ..tokenizer import tokenizer
+
                                         masked_ids = token_ids.clone()
                                         masked_ids[nongermline_mask] = tokenizer.mask_token_id
 
