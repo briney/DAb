@@ -5,7 +5,11 @@ num_timesteps: 100
 
 # Power schedule parameter (only used when schedule_type=power)
 # Higher power = lower average masking rate
-# power=4.0 gives ~20% avg masking, power=5.0 gives ~17%
+# power=1.0 gives ~50% avg masking (linear)
+# power=2.0 gives ~33% avg masking
+# power=3.0 gives ~25% avg masking
+# power=4.0 gives ~20% avg masking
+# power=5.0 gives ~17% avg masking
 power: 4.0
 
 # Information-weighted masking settings
