@@ -1,6 +1,12 @@
 # static schedule type is equivalent to standard MLM training (no masked diffusion)
-schedule_type: cosine  # cosine | linear | sqrt | static
+# power schedule uses mask_rate = (t/T)^power for lower average masking rates
+schedule_type: cosine  # cosine | linear | sqrt | static | power
 num_timesteps: 100
+
+# Power schedule parameter (only used when schedule_type=power)
+# Higher power = lower average masking rate
+# power=4.0 gives ~20% avg masking, power=5.0 gives ~17%
+power: 4.0
 
 # Information-weighted masking settings
 # Set to false to use uniform masking even when CDR/non-germline masks are provided
@@ -17,3 +23,19 @@ nongermline_weight_multiplier: 1.0  # Weight boost for nongermline positions
 masking_selection: sampled
 
 mask_rate: 0.15  # only used when schedule_type=static
+
+# Curriculum learning for timestep sampling
+# When enabled, training starts by sampling from a limited timestep range (lower masking)
+# and gradually expands to the full range as training progresses
+
+# Expected Average Masking Rates
+
+#   | Configuration        | Early Training | Mid Training | Late Training |
+#   |----------------------|----------------|--------------|---------------|
+#   | power=4 alone        | 20%            | 20%          | 20%           |
+#   | power=5 alone        | 17%            | 17%          | 17%           |
+#   | power=4 + curriculum | 5-10%          | 12-15%       | 20%           |
+#   | power=5 + curriculum | 3-8%           | 10-12%       | 17%           |
+
+use_curriculum: false
+curriculum_start: 0.1  # Start with 10% of timestep range (e.g., first 10 of 100 timesteps)

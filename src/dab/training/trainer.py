@@ -54,10 +54,15 @@ class TrainingConfig:
     # Diffusion
     noise_schedule: str = "cosine"
     num_timesteps: int = 100
+    power: float = 4.0  # Only used when noise_schedule="power"
     use_information_weighted_masking: bool = True
     cdr_weight_multiplier: float = 1.0
     nongermline_weight_multiplier: float = 1.0
     masking_selection: str = "sampled"  # "ranked" | "sampled"
+
+    # Curriculum learning for timestep sampling
+    use_curriculum: bool = False
+    curriculum_start: float = 0.1  # Start with 10% of timestep range
 
     # Intervals (in steps)
     log_steps: int = 10
@@ -147,7 +152,9 @@ class Trainer:
         if noise_schedule is None:
             from ..diffusion import create_schedule
 
-            noise_schedule = create_schedule(config.noise_schedule, config.num_timesteps)
+            noise_schedule = create_schedule(
+                config.noise_schedule, config.num_timesteps, power=config.power
+            )
 
         self.masker = InformationWeightedMasker(
             noise_schedule,
@@ -175,6 +182,12 @@ class Trainer:
         self.epoch = 0.0
         self.steps_per_epoch = len(self.train_dataloader)
         self.logger = None
+
+        # Compute total steps for curriculum learning progress tracking
+        if config.max_epochs is not None:
+            self.total_steps = config.max_epochs * self.steps_per_epoch
+        else:
+            self.total_steps = config.max_steps
 
         # Masking frequency tracking
         self.masking_frequency_config = masking_frequency_config or MaskingFrequencyConfig()
@@ -206,7 +219,17 @@ class Trainer:
         device = batch["token_ids"].device
         batch_size = batch["token_ids"].shape[0]
 
-        timesteps = self.masker.noise_schedule.sample_timesteps(batch_size, device)
+        # Compute training progress for curriculum learning
+        training_progress = None
+        if self.config.use_curriculum:
+            training_progress = self.global_step / max(1, self.total_steps)
+
+        timesteps = self.masker.noise_schedule.sample_timesteps(
+            batch_size,
+            device,
+            training_progress=training_progress,
+            curriculum_start=self.config.curriculum_start,
+        )
 
         if self.config.use_information_weighted_masking and (
             batch.get("cdr_mask") is not None or batch.get("non_templated_mask") is not None
