@@ -10,6 +10,7 @@ from .metrics import (
     compute_diffusion_metrics,
     compute_masked_cross_entropy,
     compute_perplexity,
+    compute_weighted_masked_cross_entropy,
 )
 from .optimizer import create_optimizer, create_scheduler, get_lr
 from .trainer import Trainer, TrainingConfig
@@ -28,6 +29,7 @@ __all__ = [
     "MetricAccumulator",
     "DiffusionMetrics",
     "compute_masked_cross_entropy",
+    "compute_weighted_masked_cross_entropy",
     "compute_accuracy",
     "compute_perplexity",
     "compute_diffusion_metrics",

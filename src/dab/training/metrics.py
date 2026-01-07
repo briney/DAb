@@ -63,6 +63,68 @@ def compute_masked_cross_entropy(
         return masked_loss.sum() / num_masked
 
 
+def compute_weighted_masked_cross_entropy(
+    logits: Tensor,
+    targets: Tensor,
+    mask_labels: Tensor,
+    timestep_weights: Tensor,
+    reduction: str = "mean",
+) -> Tensor:
+    """Compute NELBO-weighted cross-entropy loss on masked positions.
+
+    Each sample in the batch is weighted by its timestep-dependent NELBO weight.
+    This implements the MD4-style weighted objective that emphasizes early
+    timesteps (low masking) for faster convergence.
+
+    Parameters
+    ----------
+    logits
+        Model output logits, shape (batch_size, seq_len, vocab_size).
+    targets
+        Target token IDs, shape (batch_size, seq_len).
+    mask_labels
+        Binary mask indicating masked positions, shape (batch_size, seq_len).
+    timestep_weights
+        NELBO weight for each sample, shape (batch_size,).
+    reduction
+        Reduction mode: "mean" (default), "sum", or "none".
+
+    Returns
+    -------
+    Tensor
+        The weighted loss. Shape depends on reduction mode:
+        - "mean": scalar
+        - "sum": scalar
+        - "none": (batch_size,) per-sample weighted losses
+    """
+    batch_size, seq_len, vocab_size = logits.shape
+
+    # Compute per-token loss
+    logits_flat = logits.view(-1, vocab_size)
+    targets_flat = targets.view(-1)
+    loss_per_token = torch.nn.functional.cross_entropy(
+        logits_flat, targets_flat, reduction="none"
+    )
+    loss_per_token = loss_per_token.view(batch_size, seq_len)
+
+    # Apply mask
+    masked_loss = loss_per_token * mask_labels.float()
+
+    # Compute per-sample mean loss (over masked tokens only)
+    tokens_per_sample = mask_labels.sum(dim=1).clamp(min=1)
+    sample_losses = masked_loss.sum(dim=1) / tokens_per_sample
+
+    # Weight by timestep-dependent NELBO weight
+    weighted_losses = sample_losses * timestep_weights
+
+    if reduction == "none":
+        return weighted_losses
+    elif reduction == "sum":
+        return weighted_losses.sum()
+    else:  # mean
+        return weighted_losses.mean()
+
+
 def compute_accuracy(
     logits: Tensor, targets: Tensor, mask_labels: Tensor
 ) -> tuple[float, int]:

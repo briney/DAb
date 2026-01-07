@@ -28,6 +28,20 @@ masking_selection: sampled
 
 mask_rate: 0.15  # only used when schedule_type=static
 
+# Loss objective for diffusion training
+# - mlm: Standard masked cross-entropy (uniform weighting across timesteps)
+# - nelbo: Negative ELBO with timestep-dependent weighting (MDLM-style)
+#   NELBO weights early timesteps more heavily, leading to faster convergence
+#   Reference: arxiv.org/abs/2406.04329
+loss_objective: mlm
+
+# NELBO weight normalization (only used when loss_objective=nelbo)
+# - null: Use raw weights (can be large for early timesteps)
+# - clip: Clip weights to max value (nelbo_weight_clip_max)
+# - minmax: Normalize weights to [0,1] range across timestep range
+nelbo_weight_normalize: null
+nelbo_weight_clip_max: 10.0
+
 # Curriculum learning for timestep sampling
 # When enabled, training starts by sampling from a limited timestep range (lower masking)
 # and gradually expands to the full range as training progresses

@@ -10,6 +10,7 @@ from dab.training import (
     compute_diffusion_metrics,
     compute_masked_cross_entropy,
     compute_perplexity,
+    compute_weighted_masked_cross_entropy,
 )
 
 
@@ -198,3 +199,134 @@ class TestDiffusionMetrics:
         assert d["perplexity"] == 4.5
         assert d["num_masked_tokens"] == 100
         assert d["mask_rate"] == 0.5
+
+
+class TestWeightedMaskedCrossEntropy:
+    """Tests for NELBO-weighted cross-entropy loss."""
+
+    def test_basic_weighted_loss(self):
+        """Test that weighted loss computes without error."""
+        batch_size, seq_len, vocab_size = 4, 10, 32
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        mask_labels = torch.ones(batch_size, seq_len)
+        timestep_weights = torch.ones(batch_size)
+
+        loss = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights
+        )
+        assert loss.ndim == 0
+        assert loss > 0
+
+    def test_uniform_weights_equals_unweighted(self):
+        """Test that uniform weights produce same result as unweighted mean."""
+        batch_size, seq_len, vocab_size = 4, 10, 32
+        torch.manual_seed(42)
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        mask_labels = torch.ones(batch_size, seq_len)
+        timestep_weights = torch.ones(batch_size)
+
+        weighted_loss = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights
+        )
+        unweighted_loss = compute_masked_cross_entropy(
+            logits, targets, mask_labels, reduction="mean"
+        )
+
+        # With uniform weights and full masking, weighted and unweighted should match
+        assert weighted_loss == pytest.approx(unweighted_loss.item(), rel=1e-5)
+
+    def test_higher_weight_increases_contribution(self):
+        """Test that samples with higher weights contribute more to loss."""
+        batch_size, seq_len, vocab_size = 2, 10, 32
+        torch.manual_seed(42)
+
+        # Create logits where second sample has higher loss (random vs correct)
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        # Make first sample have low loss (correct predictions)
+        for s in range(seq_len):
+            logits[0, s, targets[0, s]] = 10.0
+
+        mask_labels = torch.ones(batch_size, seq_len)
+
+        # First: weight second sample more
+        weights_high_second = torch.tensor([1.0, 10.0])
+        loss_high_second = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, weights_high_second
+        )
+
+        # Second: weight first sample more
+        weights_high_first = torch.tensor([10.0, 1.0])
+        loss_high_first = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, weights_high_first
+        )
+
+        # Loss should be higher when the high-loss sample (second) is weighted more
+        assert loss_high_second > loss_high_first
+
+    def test_partial_masking(self):
+        """Test weighted loss with partial masking."""
+        batch_size, seq_len, vocab_size = 4, 10, 32
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+        # Only mask first half
+        mask_labels = torch.zeros(batch_size, seq_len)
+        mask_labels[:, :5] = 1
+        timestep_weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+        loss = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights
+        )
+        assert loss.ndim == 0
+        assert loss > 0
+
+    def test_reduction_none(self):
+        """Test reduction='none' returns per-sample weighted losses."""
+        batch_size, seq_len, vocab_size = 4, 10, 32
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        mask_labels = torch.ones(batch_size, seq_len)
+        timestep_weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+        loss = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights, reduction="none"
+        )
+        assert loss.shape == (batch_size,)
+
+    def test_reduction_sum(self):
+        """Test reduction='sum' returns sum of weighted losses."""
+        batch_size, seq_len, vocab_size = 4, 10, 32
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        mask_labels = torch.ones(batch_size, seq_len)
+        timestep_weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+        loss_none = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights, reduction="none"
+        )
+        loss_sum = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights, reduction="sum"
+        )
+
+        assert loss_sum == pytest.approx(loss_none.sum().item(), rel=1e-5)
+
+    def test_zero_masked_tokens_handled(self):
+        """Test handling when some samples have no masked tokens."""
+        batch_size, seq_len, vocab_size = 2, 10, 32
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+        # First sample has no masks, second sample has all masks
+        mask_labels = torch.zeros(batch_size, seq_len)
+        mask_labels[1, :] = 1
+        timestep_weights = torch.tensor([1.0, 1.0])
+
+        # Should not raise and should compute based on second sample only
+        loss = compute_weighted_masked_cross_entropy(
+            logits, targets, mask_labels, timestep_weights
+        )
+        assert not torch.isnan(loss)
+        assert not torch.isinf(loss)

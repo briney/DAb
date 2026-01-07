@@ -363,3 +363,148 @@ class TestCurriculumSampling:
         )
         assert timesteps.min() >= 1
         assert timesteps.max() <= 10
+
+
+class TestNELBOWeights:
+    """Tests for NELBO weight computation across all schedule types."""
+
+    def test_linear_nelbo_weight_formula(self):
+        """Test linear schedule NELBO weight: T/t."""
+        schedule = LinearSchedule(num_timesteps=100)
+        # At t=1: weight = 100/1 = 100
+        assert schedule.get_nelbo_weight(1) == pytest.approx(100.0, rel=1e-6)
+        # At t=50: weight = 100/50 = 2
+        assert schedule.get_nelbo_weight(50) == pytest.approx(2.0, rel=1e-6)
+        # At t=100: weight = 100/100 = 1
+        assert schedule.get_nelbo_weight(100) == pytest.approx(1.0, rel=1e-6)
+
+    def test_linear_nelbo_weight_tensor(self):
+        """Test linear schedule NELBO weight with tensor input."""
+        schedule = LinearSchedule(num_timesteps=100)
+        timesteps = torch.tensor([1, 10, 50, 100])
+        weights = schedule.get_nelbo_weight(timesteps)
+        expected = torch.tensor([100.0, 10.0, 2.0, 1.0])
+        assert torch.allclose(weights, expected, rtol=1e-6)
+
+    def test_cosine_nelbo_weight_positive(self):
+        """Test cosine schedule NELBO weights are positive."""
+        schedule = CosineSchedule(num_timesteps=100)
+        for t in [1, 25, 50, 75, 100]:
+            weight = schedule.get_nelbo_weight(t)
+            assert weight > 0
+
+    def test_cosine_nelbo_weight_decreasing(self):
+        """Test cosine schedule NELBO weights decrease with timestep."""
+        schedule = CosineSchedule(num_timesteps=100)
+        prev_weight = float("inf")
+        for t in [1, 10, 25, 50, 75, 100]:
+            weight = schedule.get_nelbo_weight(t)
+            assert weight < prev_weight
+            prev_weight = weight
+
+    def test_sqrt_nelbo_weight_formula(self):
+        """Test sqrt schedule NELBO weight: T/(2t)."""
+        schedule = SqrtSchedule(num_timesteps=100)
+        # At t=1: weight = 100/(2*1) = 50
+        assert schedule.get_nelbo_weight(1) == pytest.approx(50.0, rel=1e-6)
+        # At t=50: weight = 100/(2*50) = 1
+        assert schedule.get_nelbo_weight(50) == pytest.approx(1.0, rel=1e-6)
+        # At t=100: weight = 100/(2*100) = 0.5
+        assert schedule.get_nelbo_weight(100) == pytest.approx(0.5, rel=1e-6)
+
+    def test_power_nelbo_weight_formula(self):
+        """Test power schedule NELBO weight: p*T/t."""
+        schedule = PowerSchedule(num_timesteps=100, power=4.0)
+        # At t=1: weight = 4*100/1 = 400
+        assert schedule.get_nelbo_weight(1) == pytest.approx(400.0, rel=1e-6)
+        # At t=50: weight = 4*100/50 = 8
+        assert schedule.get_nelbo_weight(50) == pytest.approx(8.0, rel=1e-6)
+        # At t=100: weight = 4*100/100 = 4
+        assert schedule.get_nelbo_weight(100) == pytest.approx(4.0, rel=1e-6)
+
+    def test_power_nelbo_weight_different_powers(self):
+        """Test that higher power gives proportionally higher weights."""
+        schedule_p2 = PowerSchedule(num_timesteps=100, power=2.0)
+        schedule_p4 = PowerSchedule(num_timesteps=100, power=4.0)
+        # At same timestep, weight ratio should equal power ratio
+        for t in [10, 50, 100]:
+            ratio = schedule_p4.get_nelbo_weight(t) / schedule_p2.get_nelbo_weight(t)
+            assert ratio == pytest.approx(2.0, rel=1e-6)
+
+    def test_static_nelbo_weight_constant(self):
+        """Test static schedule NELBO weight is always 1.0."""
+        schedule = StaticSchedule(num_timesteps=100, mask_rate=0.15)
+        for t in [1, 25, 50, 75, 100]:
+            assert schedule.get_nelbo_weight(t) == pytest.approx(1.0, rel=1e-6)
+
+    def test_static_nelbo_weight_tensor(self):
+        """Test static schedule returns tensor of ones for tensor input."""
+        schedule = StaticSchedule(num_timesteps=100, mask_rate=0.15)
+        timesteps = torch.tensor([1, 25, 50, 75, 100])
+        weights = schedule.get_nelbo_weight(timesteps)
+        expected = torch.ones(5)
+        assert torch.allclose(weights, expected)
+
+
+class TestNELBOWeightNormalization:
+    """Tests for NELBO weight normalization options."""
+
+    def test_no_normalization(self):
+        """Test that normalize=None returns raw weights."""
+        schedule = LinearSchedule(num_timesteps=100)
+        raw_weight = schedule.get_nelbo_weight(1)
+        normalized_weight = schedule.get_normalized_nelbo_weight(1, normalize=None)
+        assert raw_weight == normalized_weight
+
+    def test_clip_normalization(self):
+        """Test clip normalization caps weights at max value."""
+        schedule = LinearSchedule(num_timesteps=100)
+        # At t=1, raw weight = 100, should be clipped to 10
+        clipped = schedule.get_normalized_nelbo_weight(1, normalize="clip", clip_max=10.0)
+        assert clipped == pytest.approx(10.0, rel=1e-6)
+        # At t=50, raw weight = 2, should not be clipped
+        not_clipped = schedule.get_normalized_nelbo_weight(50, normalize="clip", clip_max=10.0)
+        assert not_clipped == pytest.approx(2.0, rel=1e-6)
+
+    def test_clip_normalization_tensor(self):
+        """Test clip normalization with tensor input."""
+        schedule = LinearSchedule(num_timesteps=100)
+        timesteps = torch.tensor([1, 10, 50, 100])
+        clipped = schedule.get_normalized_nelbo_weight(timesteps, normalize="clip", clip_max=5.0)
+        # Raw: [100, 10, 2, 1] -> Clipped: [5, 5, 2, 1]
+        expected = torch.tensor([5.0, 5.0, 2.0, 1.0])
+        assert torch.allclose(clipped, expected, rtol=1e-6)
+
+    def test_minmax_normalization(self):
+        """Test min-max normalization scales to [0, 1]."""
+        schedule = LinearSchedule(num_timesteps=100)
+        # For linear: weights range from 100 (t=1) to 1 (t=100)
+        # At t=1 (max weight): should be 1.0
+        max_normalized = schedule.get_normalized_nelbo_weight(1, normalize="minmax")
+        assert max_normalized == pytest.approx(1.0, rel=1e-6)
+        # At t=100 (min weight): should be 0.0
+        min_normalized = schedule.get_normalized_nelbo_weight(100, normalize="minmax")
+        assert min_normalized == pytest.approx(0.0, rel=1e-6)
+
+    def test_minmax_normalization_tensor(self):
+        """Test min-max normalization with tensor input."""
+        schedule = LinearSchedule(num_timesteps=100)
+        timesteps = torch.tensor([1, 100])
+        normalized = schedule.get_normalized_nelbo_weight(timesteps, normalize="minmax")
+        # t=1 maps to 1.0, t=100 maps to 0.0
+        expected = torch.tensor([1.0, 0.0])
+        assert torch.allclose(normalized, expected, rtol=1e-6)
+
+    def test_invalid_normalization(self):
+        """Test that invalid normalization method raises error."""
+        schedule = LinearSchedule(num_timesteps=100)
+        with pytest.raises(ValueError, match="Unknown normalization"):
+            schedule.get_normalized_nelbo_weight(50, normalize="invalid")
+
+    def test_static_schedule_normalization(self):
+        """Test normalization with static schedule (constant weights)."""
+        schedule = StaticSchedule(num_timesteps=100, mask_rate=0.15)
+        # With constant weights, minmax normalization returns same value
+        # (because w_max - w_min = 0, so we return raw weights)
+        normalized = schedule.get_normalized_nelbo_weight(50, normalize="minmax")
+        assert normalized == pytest.approx(1.0, rel=1e-6)

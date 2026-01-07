@@ -21,6 +21,7 @@ from .metrics import (
     MetricAccumulator,
     compute_diffusion_metrics,
     compute_masked_cross_entropy,
+    compute_weighted_masked_cross_entropy,
 )
 from .optimizer import create_optimizer, create_scheduler, get_lr
 
@@ -63,6 +64,11 @@ class TrainingConfig:
     # Curriculum learning for timestep sampling
     use_curriculum: bool = False
     curriculum_start: float = 0.1  # Start with 10% of timestep range
+
+    # Loss objective
+    loss_objective: str = "mlm"  # "mlm" (uniform) | "nelbo" (weighted)
+    nelbo_weight_normalize: str | None = None  # None | "clip" | "minmax"
+    nelbo_weight_clip_max: float = 10.0
 
     # Intervals (in steps)
     log_steps: int = 10
@@ -279,11 +285,25 @@ class Trainer:
         )
 
         # Recompute loss tensor for backprop (metrics.loss is a float)
-        loss = compute_masked_cross_entropy(
-            logits=outputs["logits"],
-            targets=batch["token_ids"],
-            mask_labels=mask_output["mask_labels"],
-        )
+        if self.config.loss_objective == "nelbo":
+            # Compute NELBO weights for each sample based on its timestep
+            timestep_weights = self.masker.noise_schedule.get_normalized_nelbo_weight(
+                mask_output["timesteps"],
+                normalize=self.config.nelbo_weight_normalize,
+                clip_max=self.config.nelbo_weight_clip_max,
+            )
+            loss = compute_weighted_masked_cross_entropy(
+                logits=outputs["logits"],
+                targets=batch["token_ids"],
+                mask_labels=mask_output["mask_labels"],
+                timestep_weights=timestep_weights,
+            )
+        else:
+            loss = compute_masked_cross_entropy(
+                logits=outputs["logits"],
+                targets=batch["token_ids"],
+                mask_labels=mask_output["mask_labels"],
+            )
 
         return loss, metrics
 
