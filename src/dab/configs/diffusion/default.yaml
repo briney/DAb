@@ -30,12 +30,18 @@ mask_rate: 0.15  # only used when schedule_type=static
 
 # Expected Average Masking Rates
 
-#   | Configuration        | Early Training | Mid Training | Late Training |
-#   |----------------------|----------------|--------------|---------------|
-#   | power=4 alone        | 20%            | 20%          | 20%           |
-#   | power=5 alone        | 17%            | 17%          | 17%           |
-#   | power=4 + curriculum | 5-10%          | 12-15%       | 20%           |
-#   | power=5 + curriculum | 3-8%           | 10-12%       | 17%           |
+#  | Configuration        | Early Training | Mid Training | Late Training |
+#  |----------------------|----------------|--------------|---------------|
+#  | power=1 alone        | 50%            | 50%          | 50%           |
+#  | power=2 alone        | 33%            | 33%          | 33%           |
+#  | power=3 alone        | 25%            | 25%          | 25%           |
+#  | power=4 alone        | 20%            | 20%          | 20%           |
+#  | power=5 alone        | 17%            | 17%          | 17%           |
+#  | power=1 + curriculum | 25-35%         | 40-45%       | 50%           |
+#  | power=2 + curriculum | 15-22%         | 25-30%       | 33%           |
+#  | power=3 + curriculum | 10-16%         | 18-22%       | 25%           |
+#  | power=4 + curriculum | 5-10%          | 12-15%       | 20%           |
+#  | power=5 + curriculum | 3-8%           | 10-12%       | 17%           |
 
 use_curriculum: false
 curriculum_start: 0.1  # Start with 10% of timestep range (e.g., first 10 of 100 timesteps)
