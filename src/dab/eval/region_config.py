@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .regions import AGGREGATE_GROUP_NAMES, INDIVIDUAL_REGION_NAMES
+
 
 @dataclass
 class RegionEvalConfig:
@@ -84,11 +86,7 @@ class RegionEvalConfig:
         set[str]
             Set of region names (e.g., {"hcdr1", "hcdr3", "lcdr3"}).
         """
-        regions = set()
-        for region in _INDIVIDUAL_REGIONS:
-            if getattr(self, region, False):
-                regions.add(region)
-        return regions
+        return {r for r in INDIVIDUAL_REGION_NAMES if getattr(self, r, False)}
 
     def get_enabled_aggregates(self) -> set[str]:
         """Return set of enabled aggregate group names.
@@ -98,11 +96,7 @@ class RegionEvalConfig:
         set[str]
             Set of aggregate names (e.g., {"all_cdr", "heavy"}).
         """
-        aggregates = set()
-        for agg in _AGGREGATE_GROUPS:
-            if getattr(self, agg, False):
-                aggregates.add(agg)
-        return aggregates
+        return {a for a in AGGREGATE_GROUP_NAMES if getattr(self, a, False)}
 
     def has_any_enabled(self) -> bool:
         """Check if any region or aggregate is enabled.
@@ -113,27 +107,6 @@ class RegionEvalConfig:
             True if at least one region or aggregate is enabled.
         """
         return bool(self.get_enabled_regions() or self.get_enabled_aggregates())
-
-
-# Region name constants for iteration
-_INDIVIDUAL_REGIONS = (
-    "hcdr1",
-    "hcdr2",
-    "hcdr3",
-    "lcdr1",
-    "lcdr2",
-    "lcdr3",
-    "hfwr1",
-    "hfwr2",
-    "hfwr3",
-    "hfwr4",
-    "lfwr1",
-    "lfwr2",
-    "lfwr3",
-    "lfwr4",
-)
-
-_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall", "germline", "nongermline")
 
 
 def build_region_eval_config(cfg_dict: dict) -> RegionEvalConfig:

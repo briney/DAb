@@ -17,21 +17,8 @@ from torch import Tensor
 from .rope import RotaryPositionEmbedding
 
 
-class MultiHeadAttention(nn.Module):
-    """
-    Standard multi-head self-attention with RoPE.
-
-    Uses F.scaled_dot_product_attention for efficiency when need_weights=False,
-    allowing PyTorch to use optimized implementations (Flash Attention, etc.).
-
-    Args:
-        d_model: Model dimension
-        n_heads: Number of attention heads
-        head_dim: Dimension per head (default: 64)
-        dropout: Attention dropout probability
-        bias: Whether to use bias in projections
-        max_seq_len: Maximum sequence length for RoPE
-    """
+class BaseAttention(nn.Module):
+    """Base class for attention modules with shared initialization and utilities."""
 
     def __init__(
         self,
@@ -49,16 +36,10 @@ class MultiHeadAttention(nn.Module):
         self.head_dim = head_dim
         self.scale = head_dim**-0.5
         self.dropout_p = dropout
+        self.inner_dim = n_heads * head_dim
 
-        inner_dim = n_heads * head_dim
-
-        # QKV projections
-        self.q_proj = nn.Linear(d_model, inner_dim, bias=bias)
-        self.k_proj = nn.Linear(d_model, inner_dim, bias=bias)
-        self.v_proj = nn.Linear(d_model, inner_dim, bias=bias)
-
-        # Output projection
-        self.out_proj = nn.Linear(inner_dim, d_model, bias=bias)
+        # Output projection (shared by all attention types)
+        self.out_proj = nn.Linear(self.inner_dim, d_model, bias=bias)
 
         # RoPE
         self.rope = RotaryPositionEmbedding(head_dim, max_seq_len=max_seq_len)
@@ -87,6 +68,39 @@ class MultiHeadAttention(nn.Module):
         padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
         padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
         return padding_mask
+
+
+class MultiHeadAttention(BaseAttention):
+    """
+    Standard multi-head self-attention with RoPE.
+
+    Uses F.scaled_dot_product_attention for efficiency when need_weights=False,
+    allowing PyTorch to use optimized implementations (Flash Attention, etc.).
+
+    Args:
+        d_model: Model dimension
+        n_heads: Number of attention heads
+        head_dim: Dimension per head (default: 64)
+        dropout: Attention dropout probability
+        bias: Whether to use bias in projections
+        max_seq_len: Maximum sequence length for RoPE
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        head_dim: int = 64,
+        dropout: float = 0.0,
+        bias: bool = False,
+        max_seq_len: int = 512,
+    ) -> None:
+        super().__init__(d_model, n_heads, head_dim, dropout, bias, max_seq_len)
+
+        # QKV projections
+        self.q_proj = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.k_proj = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.v_proj = nn.Linear(d_model, self.inner_dim, bias=bias)
 
     def forward(
         self,
@@ -160,7 +174,7 @@ class MultiHeadAttention(nn.Module):
         return output
 
 
-class ChainAwareAttention(nn.Module):
+class ChainAwareAttention(BaseAttention):
     """
     Attention module implementing MINT-style hybrid intra/inter-chain attention.
 
@@ -189,68 +203,31 @@ class ChainAwareAttention(nn.Module):
         bias: bool = False,
         max_seq_len: int = 512,
     ) -> None:
-        super().__init__()
-
-        self.d_model = d_model
-        self.n_heads = n_heads
-        self.head_dim = head_dim
-        self.scale = head_dim**-0.5
-        self.dropout_p = dropout
-
-        inner_dim = n_heads * head_dim
+        super().__init__(d_model, n_heads, head_dim, dropout, bias, max_seq_len)
 
         # Self-attention projections (RoPE will be applied to Q and K)
-        self.q_self = nn.Linear(d_model, inner_dim, bias=bias)
-        self.k_self = nn.Linear(d_model, inner_dim, bias=bias)
-        self.v_self = nn.Linear(d_model, inner_dim, bias=bias)
+        self.q_self = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.k_self = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.v_self = nn.Linear(d_model, self.inner_dim, bias=bias)
 
         # Cross-attention projections (no RoPE)
-        self.q_cross = nn.Linear(d_model, inner_dim, bias=bias)
-        self.k_cross = nn.Linear(d_model, inner_dim, bias=bias)
-        self.v_cross = nn.Linear(d_model, inner_dim, bias=bias)
+        self.q_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.k_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
+        self.v_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
 
-        # Output projection
-        self.out_proj = nn.Linear(inner_dim, d_model, bias=bias)
-
-        # RoPE (only applied to self-attention)
-        self.rope = RotaryPositionEmbedding(head_dim, max_seq_len=max_seq_len)
-
-        self.dropout = nn.Dropout(dropout)
-
-    def _create_chain_mask(
-        self,
-        chain_ids: Tensor,
-        attention_mask: Tensor | None,
-        input_dtype: torch.dtype,
-    ) -> tuple[Tensor, Tensor | None]:
+    def _create_chain_mask(self, chain_ids: Tensor) -> Tensor:
         """
-        Create intra-chain mask and padding mask.
+        Create intra-chain boolean mask.
 
         Args:
             chain_ids: Chain identity tensor of shape (batch, seq_len)
-            attention_mask: Optional padding mask of shape (batch, seq_len)
-            input_dtype: Dtype of input tensor (for mixed precision compatibility)
 
         Returns:
             intra_mask: Boolean mask where True = same chain (batch, 1, seq_len, seq_len)
-            padding_mask: Additive mask with -inf for padding (batch, 1, 1, seq_len)
         """
-        # Chain masks: (batch, seq_len, seq_len)
         chain_i = chain_ids.unsqueeze(-1)  # (batch, seq_len, 1)
         chain_j = chain_ids.unsqueeze(-2)  # (batch, 1, seq_len)
-        intra_mask = (chain_i == chain_j).unsqueeze(1)  # (batch, 1, seq_len, seq_len)
-
-        # Padding mask
-        if attention_mask is not None:
-            # Create additive mask: 0 where valid, -inf where padding
-            # Use same dtype as input for mixed precision compatibility
-            padding_mask = torch.zeros_like(attention_mask, dtype=input_dtype)
-            padding_mask = padding_mask.masked_fill(~attention_mask.bool(), float("-inf"))
-            padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
-        else:
-            padding_mask = None
-
-        return intra_mask, padding_mask
+        return (chain_i == chain_j).unsqueeze(1)  # (batch, 1, seq_len, seq_len)
 
     def forward(
         self,
@@ -293,10 +270,9 @@ class ChainAwareAttention(nn.Module):
         scores_self = torch.matmul(q_self, k_self.transpose(-2, -1)) * self.scale
         scores_cross = torch.matmul(q_cross, k_cross.transpose(-2, -1)) * self.scale
 
-        # Create chain masks
-        intra_mask, padding_mask = self._create_chain_mask(
-            chain_ids, attention_mask, x.dtype
-        )
+        # Create masks
+        intra_mask = self._create_chain_mask(chain_ids)
+        padding_mask = self._create_padding_mask(attention_mask, x.dtype)
 
         # Convert intra_mask to same dtype as input for torch.where and later multiplication
         intra_mask_float = intra_mask.to(x.dtype)

@@ -76,6 +76,7 @@ class InformationWeightedMasker:
         cdr_mask: Tensor | None = None,
         non_templated_mask: Tensor | None = None,
         special_tokens_mask: Tensor | None = None,
+        generator: torch.Generator | None = None,
     ) -> tuple[Tensor, Tensor]:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device
@@ -98,14 +99,15 @@ class InformationWeightedMasker:
         # Compute scores based on selection method
         if self.selection_method == "ranked":
             # Deterministic top-K selection (small noise only for tie-breaking)
-            noise = torch.rand_like(weights) * 1e-6
+            noise = torch.rand(weights.shape, device=device, generator=generator) * 1e-6
             scores = weights + noise
         else:
             # Gumbel-top-k: weighted probabilistic sampling without replacement
             # Adding Gumbel noise to log-weights gives proper weighted sampling
             # See: https://arxiv.org/abs/1903.06059 (Gumbel-Top-k trick)
             eps = 1e-10
-            uniform = torch.rand_like(weights).clamp(min=eps, max=1 - eps)
+            uniform = torch.rand(weights.shape, device=device, generator=generator)
+            uniform = uniform.clamp(min=eps, max=1 - eps)
             gumbel_noise = -torch.log(-torch.log(uniform))
             scores = torch.log(weights + eps) + gumbel_noise
 
@@ -146,12 +148,13 @@ class UniformMasker:
         timesteps: Tensor,
         attention_mask: Tensor,
         special_tokens_mask: Tensor | None = None,
+        generator: torch.Generator | None = None,
     ) -> tuple[Tensor, Tensor]:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device
 
         mask_rates = self.noise_schedule.get_mask_rate(timesteps)
-        rand = torch.rand(batch_size, seq_len, device=device)
+        rand = torch.rand(batch_size, seq_len, device=device, generator=generator)
 
         maskable = attention_mask.bool()
         if special_tokens_mask is not None:

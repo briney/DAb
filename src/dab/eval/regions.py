@@ -70,6 +70,34 @@ LIGHT_CDR_REGIONS = frozenset(
     {AntibodyRegion.LCDR1, AntibodyRegion.LCDR2, AntibodyRegion.LCDR3}
 )
 
+# Region name constants for iteration (used by config classes)
+INDIVIDUAL_REGION_NAMES = (
+    "hcdr1",
+    "hcdr2",
+    "hcdr3",
+    "lcdr1",
+    "lcdr2",
+    "lcdr3",
+    "hfwr1",
+    "hfwr2",
+    "hfwr3",
+    "hfwr4",
+    "lfwr1",
+    "lfwr2",
+    "lfwr3",
+    "lfwr4",
+)
+
+AGGREGATE_GROUP_NAMES = (
+    "all_cdr",
+    "all_fwr",
+    "heavy",
+    "light",
+    "overall",
+    "germline",
+    "nongermline",
+)
+
 
 def _find_contiguous_regions(
     mask: Tensor,

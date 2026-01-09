@@ -56,26 +56,35 @@ def compute_model_flops_per_token(config: DAbConfig) -> int:
     vocab_size = config.vocab_size
 
     # QKV projection factor: 1x for standard attention, 2x for chain-aware
+    # Chain-aware attention has separate QKV projections for self and cross attention
     qkv_factor = 2 if config.use_chain_aware_attention else 1
 
     flops_per_layer = 0
 
     # Attention QKV projections: qkv_factor * 3 * 2 * d_model^2 per token
+    # Each linear layer: 2 * input * output FLOPs (multiply-add pairs)
+    # 3 projections (Q, K, V) each with d_model -> d_model
     flops_per_layer += qkv_factor * 3 * 2 * d_model * d_model
 
     # Attention QK^T and Attn@V: 2 * 2 * seq_len * d_model per token
+    # QK^T: 2 * seq_len * d_model (query @ key.T per position)
+    # Attn@V: 2 * seq_len * d_model (attention weights @ values per position)
     flops_per_layer += 4 * seq_len * d_model
 
     # Output projection: 2 * d_model^2 per token
+    # Linear layer: d_model -> d_model
     flops_per_layer += 2 * d_model * d_model
 
     # FFN (SwiGLU): 3 * 2 * d_model * d_ffn per token
+    # SwiGLU has 3 weight matrices: gate_up (d_model -> 2*d_ffn) and down (d_ffn -> d_model)
+    # Equivalent to: 2 * d_model * 2*d_ffn + 2 * d_ffn * d_model = 6 * d_model * d_ffn
     flops_per_layer += 6 * d_model * d_ffn
 
     # Total for all layers
     total_flops = n_layers * flops_per_layer
 
     # LM head: 2 * d_model * vocab_size per token
+    # Linear layer: d_model -> vocab_size
     total_flops += 2 * d_model * vocab_size
 
     return total_flops

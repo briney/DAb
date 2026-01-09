@@ -3,36 +3,7 @@
 import pytest
 import torch
 
-from dab.model.ffn import FusedSwiGLUFFN, SwiGLU, SwiGLUFFN
-
-
-class TestSwiGLU:
-    def test_forward(self):
-        swiglu = SwiGLU()
-        x = torch.randn(2, 10, 64)
-        gate = torch.randn(2, 10, 64)
-        out = swiglu(x, gate)
-        assert out.shape == x.shape
-
-
-class TestSwiGLUFFN:
-    @pytest.fixture
-    def ffn(self):
-        return SwiGLUFFN(d_model=64, d_ffn=128, dropout=0.0)
-
-    def test_forward_shape(self, ffn):
-        x = torch.randn(2, 10, 64)
-        out = ffn(x)
-        assert out.shape == x.shape
-
-    def test_d_ffn_required(self):
-        """d_ffn is now required (computed by DAbConfig)."""
-        with pytest.raises(TypeError):
-            SwiGLUFFN(d_model=64)
-
-    def test_custom_d_ffn(self):
-        ffn = SwiGLUFFN(d_model=64, d_ffn=256)
-        assert ffn.d_ffn == 256
+from dab.model.ffn import FusedSwiGLUFFN
 
 
 class TestFusedSwiGLUFFN:
@@ -45,14 +16,21 @@ class TestFusedSwiGLUFFN:
         out = ffn(x)
         assert out.shape == x.shape
 
-    def test_matches_unfused(self):
-        """Test that fused and unfused produce same output dimensions."""
-        d_model, d_ffn = 64, 128
-        fused = FusedSwiGLUFFN(d_model=d_model, d_ffn=d_ffn, dropout=0.0)
-        unfused = SwiGLUFFN(d_model=d_model, d_ffn=d_ffn, dropout=0.0)
+    def test_d_ffn_required(self):
+        """d_ffn is required."""
+        with pytest.raises(TypeError):
+            FusedSwiGLUFFN(d_model=64)
 
-        x = torch.randn(2, 10, d_model)
-        out_fused = fused(x)
-        out_unfused = unfused(x)
+    def test_custom_d_ffn(self):
+        ffn = FusedSwiGLUFFN(d_model=64, d_ffn=256)
+        assert ffn.d_ffn == 256
 
-        assert out_fused.shape == out_unfused.shape
+    def test_gradient_flow(self):
+        """Test that gradients flow through the FFN."""
+        ffn = FusedSwiGLUFFN(d_model=64, d_ffn=128, dropout=0.0)
+        x = torch.randn(2, 10, 64, requires_grad=True)
+        out = ffn(x)
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert x.grad.shape == x.shape

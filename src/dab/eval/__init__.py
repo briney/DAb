@@ -35,10 +35,12 @@ from .masking import EvalMasker, create_eval_masker
 from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
 from .region_config import RegionEvalConfig, build_region_eval_config
 from .regions import (
+    AGGREGATE_GROUP_NAMES,
     AntibodyRegion,
     CDR_REGIONS,
     FWR_REGIONS,
     HEAVY_REGIONS,
+    INDIVIDUAL_REGION_NAMES,
     LIGHT_REGIONS,
     aggregate_region_masks,
     extract_region_masks,
@@ -67,6 +69,8 @@ __all__ = [
     "FWR_REGIONS",
     "HEAVY_REGIONS",
     "LIGHT_REGIONS",
+    "INDIVIDUAL_REGION_NAMES",
+    "AGGREGATE_GROUP_NAMES",
     "extract_region_masks",
     "aggregate_region_masks",
     # Per-position evaluation

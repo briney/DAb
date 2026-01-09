@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from torch import Tensor
 
+from ..eval.regions import AGGREGATE_GROUP_NAMES, INDIVIDUAL_REGION_NAMES
+
 if TYPE_CHECKING:
     from ..eval.regions import AntibodyRegion
 
@@ -77,27 +79,6 @@ class MaskingFrequencyConfig:
     nongermline: bool = False
 
 
-# Region name constants for iteration
-_INDIVIDUAL_REGIONS = (
-    "hcdr1",
-    "hcdr2",
-    "hcdr3",
-    "lcdr1",
-    "lcdr2",
-    "lcdr3",
-    "hfwr1",
-    "hfwr2",
-    "hfwr3",
-    "hfwr4",
-    "lfwr1",
-    "lfwr2",
-    "lfwr3",
-    "lfwr4",
-)
-
-_AGGREGATE_GROUPS = ("all_cdr", "all_fwr", "heavy", "light", "overall", "germline", "nongermline")
-
-
 class MaskingFrequencyTracker:
     """Tracks masking frequency per antibody region.
 
@@ -132,11 +113,11 @@ class MaskingFrequencyTracker:
 
     def get_enabled_regions(self) -> set[str]:
         """Return set of individually enabled region names."""
-        return {r for r in _INDIVIDUAL_REGIONS if getattr(self.config, r, False)}
+        return {r for r in INDIVIDUAL_REGION_NAMES if getattr(self.config, r, False)}
 
     def get_enabled_aggregates(self) -> set[str]:
         """Return set of enabled aggregate group names."""
-        return {a for a in _AGGREGATE_GROUPS if getattr(self.config, a, False)}
+        return {a for a in AGGREGATE_GROUP_NAMES if getattr(self.config, a, False)}
 
     def update(
         self,

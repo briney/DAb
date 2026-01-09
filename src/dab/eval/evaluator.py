@@ -13,7 +13,13 @@ from .base import Metric
 from .masking import EvalMasker, create_eval_masker
 from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
 from .region_config import RegionEvalConfig, build_region_eval_config
-from .regions import AntibodyRegion
+from .regions import (
+    AntibodyRegion,
+    CDR_REGIONS,
+    FWR_REGIONS,
+    HEAVY_REGIONS,
+    LIGHT_REGIONS,
+)
 from .registry import build_metrics
 
 if TYPE_CHECKING:
@@ -424,57 +430,18 @@ class Evaluator:
         regions_needed: set[AntibodyRegion] = set()
         enabled_aggs = config.get_enabled_aggregates()
 
-        # CDR regions
-        cdr_regions = {
-            AntibodyRegion.HCDR1,
-            AntibodyRegion.HCDR2,
-            AntibodyRegion.HCDR3,
-            AntibodyRegion.LCDR1,
-            AntibodyRegion.LCDR2,
-            AntibodyRegion.LCDR3,
-        }
-        # FWR regions
-        fwr_regions = {
-            AntibodyRegion.HFWR1,
-            AntibodyRegion.HFWR2,
-            AntibodyRegion.HFWR3,
-            AntibodyRegion.HFWR4,
-            AntibodyRegion.LFWR1,
-            AntibodyRegion.LFWR2,
-            AntibodyRegion.LFWR3,
-            AntibodyRegion.LFWR4,
-        }
-        # Heavy chain regions
-        heavy_regions = {
-            AntibodyRegion.HCDR1,
-            AntibodyRegion.HCDR2,
-            AntibodyRegion.HCDR3,
-            AntibodyRegion.HFWR1,
-            AntibodyRegion.HFWR2,
-            AntibodyRegion.HFWR3,
-            AntibodyRegion.HFWR4,
-        }
-        # Light chain regions
-        light_regions = {
-            AntibodyRegion.LCDR1,
-            AntibodyRegion.LCDR2,
-            AntibodyRegion.LCDR3,
-            AntibodyRegion.LFWR1,
-            AntibodyRegion.LFWR2,
-            AntibodyRegion.LFWR3,
-            AntibodyRegion.LFWR4,
+        # Map aggregate names to region sets
+        aggregate_to_regions = {
+            "all_cdr": CDR_REGIONS,
+            "all_fwr": FWR_REGIONS,
+            "heavy": HEAVY_REGIONS,
+            "light": LIGHT_REGIONS,
+            "overall": CDR_REGIONS | FWR_REGIONS,
         }
 
-        if "all_cdr" in enabled_aggs:
-            regions_needed |= cdr_regions
-        if "all_fwr" in enabled_aggs:
-            regions_needed |= fwr_regions
-        if "heavy" in enabled_aggs:
-            regions_needed |= heavy_regions
-        if "light" in enabled_aggs:
-            regions_needed |= light_regions
-        if "overall" in enabled_aggs:
-            regions_needed |= cdr_regions | fwr_regions
+        for agg_name, region_set in aggregate_to_regions.items():
+            if agg_name in enabled_aggs:
+                regions_needed |= region_set
 
         return regions_needed
 
@@ -492,109 +459,63 @@ class Evaluator:
         Returns:
             Aggregated metrics with / separator.
         """
+
+        def _metrics_from_accumulator(
+            acc: dict[str, float], prefix: str
+        ) -> dict[str, float]:
+            """Convert accumulator to metric dict with prefix."""
+            if acc["count"] <= 0:
+                return {}
+            avg_loss = acc["total_loss"] / acc["count"]
+            return {
+                f"{prefix}/accuracy": acc["correct"] / acc["count"],
+                f"{prefix}/loss": avg_loss,
+                f"{prefix}/prob": acc["total_prob"] / acc["count"],
+                f"{prefix}/ppl": torch.exp(torch.tensor(avg_loss)).item(),
+            }
+
+        def _aggregate_regions(
+            region_names: set[str], accumulators: dict[str, dict[str, float]]
+        ) -> dict[str, float]:
+            """Sum accumulators for specified regions."""
+            agg = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
+            for name in region_names:
+                if name in accumulators:
+                    for k in agg:
+                        agg[k] += accumulators[name][k]
+            return agg
+
         results: dict[str, float] = {}
         enabled_aggs = config.get_enabled_aggregates()
 
-        # all_cdr: aggregate all CDR regions
-        if "all_cdr" in enabled_aggs:
-            cdr_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in ["hcdr1", "hcdr2", "hcdr3", "lcdr1", "lcdr2", "lcdr3"]:
-                if region_name in region_accumulators:
-                    for k in cdr_acc:
-                        cdr_acc[k] += region_accumulators[region_name][k]
-            if cdr_acc["count"] > 0:
-                results["all_cdr/accuracy"] = cdr_acc["correct"] / cdr_acc["count"]
-                results["all_cdr/loss"] = cdr_acc["total_loss"] / cdr_acc["count"]
-                results["all_cdr/prob"] = cdr_acc["total_prob"] / cdr_acc["count"]
-                avg_loss = cdr_acc["total_loss"] / cdr_acc["count"]
-                results["all_cdr/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+        # Map aggregate names to region name sets (lowercase values from AntibodyRegion)
+        aggregate_to_region_names = {
+            "all_cdr": {r.value for r in CDR_REGIONS},
+            "all_fwr": {r.value for r in FWR_REGIONS},
+            "heavy": {r.value for r in HEAVY_REGIONS},
+            "light": {r.value for r in LIGHT_REGIONS},
+        }
 
-        # all_fwr: aggregate all FWR regions
-        if "all_fwr" in enabled_aggs:
-            fwr_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in [
-                "hfwr1",
-                "hfwr2",
-                "hfwr3",
-                "hfwr4",
-                "lfwr1",
-                "lfwr2",
-                "lfwr3",
-                "lfwr4",
-            ]:
-                if region_name in region_accumulators:
-                    for k in fwr_acc:
-                        fwr_acc[k] += region_accumulators[region_name][k]
-            if fwr_acc["count"] > 0:
-                results["all_fwr/accuracy"] = fwr_acc["correct"] / fwr_acc["count"]
-                results["all_fwr/loss"] = fwr_acc["total_loss"] / fwr_acc["count"]
-                results["all_fwr/prob"] = fwr_acc["total_prob"] / fwr_acc["count"]
-                avg_loss = fwr_acc["total_loss"] / fwr_acc["count"]
-                results["all_fwr/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
-
-        # heavy: aggregate all heavy chain regions
-        if "heavy" in enabled_aggs:
-            heavy_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in ["hcdr1", "hcdr2", "hcdr3", "hfwr1", "hfwr2", "hfwr3", "hfwr4"]:
-                if region_name in region_accumulators:
-                    for k in heavy_acc:
-                        heavy_acc[k] += region_accumulators[region_name][k]
-            if heavy_acc["count"] > 0:
-                results["heavy/accuracy"] = heavy_acc["correct"] / heavy_acc["count"]
-                results["heavy/loss"] = heavy_acc["total_loss"] / heavy_acc["count"]
-                results["heavy/prob"] = heavy_acc["total_prob"] / heavy_acc["count"]
-                avg_loss = heavy_acc["total_loss"] / heavy_acc["count"]
-                results["heavy/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
-
-        # light: aggregate all light chain regions
-        if "light" in enabled_aggs:
-            light_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for region_name in ["lcdr1", "lcdr2", "lcdr3", "lfwr1", "lfwr2", "lfwr3", "lfwr4"]:
-                if region_name in region_accumulators:
-                    for k in light_acc:
-                        light_acc[k] += region_accumulators[region_name][k]
-            if light_acc["count"] > 0:
-                results["light/accuracy"] = light_acc["correct"] / light_acc["count"]
-                results["light/loss"] = light_acc["total_loss"] / light_acc["count"]
-                results["light/prob"] = light_acc["total_prob"] / light_acc["count"]
-                avg_loss = light_acc["total_loss"] / light_acc["count"]
-                results["light/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+        # Process standard aggregates (all_cdr, all_fwr, heavy, light)
+        for agg_name, region_names in aggregate_to_region_names.items():
+            if agg_name in enabled_aggs:
+                agg_acc = _aggregate_regions(region_names, region_accumulators)
+                results.update(_metrics_from_accumulator(agg_acc, agg_name))
 
         # overall: aggregate all regions (excluding germline/nongermline which are position-based)
         if "overall" in enabled_aggs:
-            overall_acc = {"correct": 0, "total_loss": 0.0, "total_prob": 0.0, "count": 0}
-            for name, acc in region_accumulators.items():
-                # Skip germline/nongermline - they're position-based, not region-based
-                if name in ("germline", "nongermline"):
-                    continue
-                for k in overall_acc:
-                    overall_acc[k] += acc[k]
-            if overall_acc["count"] > 0:
-                results["overall/accuracy"] = overall_acc["correct"] / overall_acc["count"]
-                results["overall/loss"] = overall_acc["total_loss"] / overall_acc["count"]
-                results["overall/prob"] = overall_acc["total_prob"] / overall_acc["count"]
-                avg_loss = overall_acc["total_loss"] / overall_acc["count"]
-                results["overall/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+            all_region_names = {
+                name for name in region_accumulators if name not in ("germline", "nongermline")
+            }
+            overall_acc = _aggregate_regions(all_region_names, region_accumulators)
+            results.update(_metrics_from_accumulator(overall_acc, "overall"))
 
-        # germline: already accumulated directly in region_accumulators
-        if "germline" in enabled_aggs and "germline" in region_accumulators:
-            acc = region_accumulators["germline"]
-            if acc["count"] > 0:
-                results["germline/accuracy"] = acc["correct"] / acc["count"]
-                results["germline/loss"] = acc["total_loss"] / acc["count"]
-                results["germline/prob"] = acc["total_prob"] / acc["count"]
-                avg_loss = acc["total_loss"] / acc["count"]
-                results["germline/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
-
-        # nongermline: already accumulated directly in region_accumulators
-        if "nongermline" in enabled_aggs and "nongermline" in region_accumulators:
-            acc = region_accumulators["nongermline"]
-            if acc["count"] > 0:
-                results["nongermline/accuracy"] = acc["correct"] / acc["count"]
-                results["nongermline/loss"] = acc["total_loss"] / acc["count"]
-                results["nongermline/prob"] = acc["total_prob"] / acc["count"]
-                avg_loss = acc["total_loss"] / acc["count"]
-                results["nongermline/ppl"] = torch.exp(torch.tensor(avg_loss)).item()
+        # germline/nongermline: already accumulated directly in region_accumulators
+        for position_agg in ("germline", "nongermline"):
+            if position_agg in enabled_aggs and position_agg in region_accumulators:
+                results.update(
+                    _metrics_from_accumulator(region_accumulators[position_agg], position_agg)
+                )
 
         return results
 

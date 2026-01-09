@@ -7,53 +7,6 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-class SwiGLU(nn.Module):
-    """SwiGLU activation: Swish(x) * gate."""
-
-    def forward(self, x: Tensor, gate: Tensor) -> Tensor:
-        return F.silu(x) * gate
-
-
-class SwiGLUFFN(nn.Module):
-    """
-    Feed-Forward Network with SwiGLU activation.
-
-    FFN(x) = W_down * SwiGLU(W_gate(x), W_up(x))
-
-    Args:
-        d_model: Model dimension
-        d_ffn: FFN intermediate dimension
-        bias: Whether to include bias in linear layers
-        dropout: Dropout probability
-    """
-
-    def __init__(
-        self,
-        d_model: int,
-        d_ffn: int,
-        bias: bool = False,
-        dropout: float = 0.0,
-    ) -> None:
-        super().__init__()
-
-        self.d_model = d_model
-        self.d_ffn = d_ffn
-
-        self.w_gate = nn.Linear(d_model, d_ffn, bias=bias)
-        self.w_up = nn.Linear(d_model, d_ffn, bias=bias)
-        self.w_down = nn.Linear(d_ffn, d_model, bias=bias)
-
-        self.activation = SwiGLU()
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-    def forward(self, x: Tensor) -> Tensor:
-        gate = self.w_gate(x)
-        up = self.w_up(x)
-        hidden = self.activation(gate, up)
-        hidden = self.dropout(hidden)
-        return self.w_down(hidden)
-
-
 class FusedSwiGLUFFN(nn.Module):
     """Memory-efficient SwiGLU FFN with fused gate/up projection."""
 
