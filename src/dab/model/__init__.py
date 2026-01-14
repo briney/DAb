@@ -8,13 +8,21 @@ from .embeddings import (
     TokenEmbedding,
 )
 from .ffn import FusedSwiGLUFFN
-from .layers import PreNormBlock, TransformerEncoder
+from .layers import PreNormBlock, TransformerBlock, TransformerEncoder
+from .normalization import (
+    LearnedQKScale,
+    QKNormModule,
+    RMSNorm,
+    create_norm_layer,
+    create_qk_norm,
+)
 from .rope import RotaryPositionEmbedding
 from .transformer import DAbConfig, DAbModel
 
 __all__ = [
     "DAbModel",
     "DAbConfig",
+    "TransformerBlock",
     "PreNormBlock",
     "TransformerEncoder",
     "BaseAttention",
@@ -26,4 +34,9 @@ __all__ = [
     "LearnedTimestepEmbedding",
     "DAbEmbedding",
     "RotaryPositionEmbedding",
+    "RMSNorm",
+    "LearnedQKScale",
+    "QKNormModule",
+    "create_norm_layer",
+    "create_qk_norm",
 ]

@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import Tensor
 
+from .normalization import create_qk_norm
 from .rope import RotaryPositionEmbedding
 
 
@@ -28,6 +29,9 @@ class BaseAttention(nn.Module):
         dropout: float = 0.0,
         bias: bool = False,
         max_seq_len: int = 512,
+        qk_norm: str = "none",
+        norm_type: str = "layernorm",
+        layer_norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
 
@@ -45,6 +49,17 @@ class BaseAttention(nn.Module):
         self.rope = RotaryPositionEmbedding(head_dim, max_seq_len=max_seq_len)
 
         self.dropout = nn.Dropout(dropout)
+
+        # QK normalization
+        self.qk_norm_module = create_qk_norm(
+            qk_norm, norm_type, n_heads, head_dim, layer_norm_eps
+        )
+
+    def _apply_qk_norm(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
+        """Apply QK normalization if configured."""
+        if self.qk_norm_module is not None:
+            return self.qk_norm_module(q, k)
+        return q, k
 
     def _create_padding_mask(
         self, attention_mask: Tensor | None, input_dtype: torch.dtype
@@ -84,6 +99,9 @@ class MultiHeadAttention(BaseAttention):
         dropout: Attention dropout probability
         bias: Whether to use bias in projections
         max_seq_len: Maximum sequence length for RoPE
+        qk_norm: QK normalization type ("none", "norm", or "learned_scale")
+        norm_type: Normalization type for qk_norm="norm" ("layernorm" or "rmsnorm")
+        layer_norm_eps: Epsilon for normalization layers
     """
 
     def __init__(
@@ -94,8 +112,14 @@ class MultiHeadAttention(BaseAttention):
         dropout: float = 0.0,
         bias: bool = False,
         max_seq_len: int = 512,
+        qk_norm: str = "none",
+        norm_type: str = "layernorm",
+        layer_norm_eps: float = 1e-6,
     ) -> None:
-        super().__init__(d_model, n_heads, head_dim, dropout, bias, max_seq_len)
+        super().__init__(
+            d_model, n_heads, head_dim, dropout, bias, max_seq_len,
+            qk_norm, norm_type, layer_norm_eps
+        )
 
         # QKV projections
         self.q_proj = nn.Linear(d_model, self.inner_dim, bias=bias)
@@ -134,6 +158,9 @@ class MultiHeadAttention(BaseAttention):
 
         # Apply RoPE
         q, k = self.rope(q, k)
+
+        # Apply QK normalization
+        q, k = self._apply_qk_norm(q, k)
 
         if need_weights:
             # Manual attention computation to get weights
@@ -192,6 +219,9 @@ class ChainAwareAttention(BaseAttention):
         dropout: Attention dropout probability
         bias: Whether to use bias in projections
         max_seq_len: Maximum sequence length for RoPE
+        qk_norm: QK normalization type ("none", "norm", or "learned_scale")
+        norm_type: Normalization type for qk_norm="norm" ("layernorm" or "rmsnorm")
+        layer_norm_eps: Epsilon for normalization layers
     """
 
     def __init__(
@@ -202,8 +232,15 @@ class ChainAwareAttention(BaseAttention):
         dropout: float = 0.0,
         bias: bool = False,
         max_seq_len: int = 512,
+        qk_norm: str = "none",
+        norm_type: str = "layernorm",
+        layer_norm_eps: float = 1e-6,
     ) -> None:
-        super().__init__(d_model, n_heads, head_dim, dropout, bias, max_seq_len)
+        # Don't pass qk_norm to base class - we handle it separately for self/cross paths
+        super().__init__(
+            d_model, n_heads, head_dim, dropout, bias, max_seq_len,
+            qk_norm="none", norm_type=norm_type, layer_norm_eps=layer_norm_eps
+        )
 
         # Self-attention projections (RoPE will be applied to Q and K)
         self.q_self = nn.Linear(d_model, self.inner_dim, bias=bias)
@@ -214,6 +251,14 @@ class ChainAwareAttention(BaseAttention):
         self.q_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
         self.k_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
         self.v_cross = nn.Linear(d_model, self.inner_dim, bias=bias)
+
+        # Separate QK normalization for self-attention and cross-attention paths
+        self.qk_norm_self = create_qk_norm(
+            qk_norm, norm_type, n_heads, head_dim, layer_norm_eps
+        )
+        self.qk_norm_cross = create_qk_norm(
+            qk_norm, norm_type, n_heads, head_dim, layer_norm_eps
+        )
 
     def _create_chain_mask(self, chain_ids: Tensor) -> Tensor:
         """
@@ -265,6 +310,12 @@ class ChainAwareAttention(BaseAttention):
 
         # Apply RoPE only to self-attention Q and K (not cross-attention)
         q_self, k_self = self.rope(q_self, k_self)
+
+        # Apply QK normalization to both paths
+        if self.qk_norm_self is not None:
+            q_self, k_self = self.qk_norm_self(q_self, k_self)
+        if self.qk_norm_cross is not None:
+            q_cross, k_cross = self.qk_norm_cross(q_cross, k_cross)
 
         # Compute raw attention scores
         scores_self = torch.matmul(q_self, k_self.transpose(-2, -1)) * self.scale

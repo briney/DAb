@@ -1,4 +1,4 @@
-"""Pre-norm transformer block with configurable attention."""
+"""Transformer block with configurable attention and normalization."""
 
 from __future__ import annotations
 
@@ -7,15 +7,18 @@ from torch import Tensor
 
 from .attention import ChainAwareAttention, MultiHeadAttention
 from .ffn import FusedSwiGLUFFN
+from .normalization import create_norm_layer
 
 
-class PreNormBlock(nn.Module):
+class TransformerBlock(nn.Module):
     """
-    Pre-norm transformer block with configurable attention and SwiGLU FFN.
+    Transformer block with configurable attention, normalization type, and placement.
 
-    Architecture:
-        x = x + Attention(LayerNorm(x))
-        x = x + FFN(LayerNorm(x))
+    Supports:
+    - Pre-norm: x = x + Sublayer(Norm(x))
+    - Post-norm: x = Norm(x + Sublayer(x))
+    - Both: x = Norm(x + Sublayer(Norm(x)))
+    - LayerNorm or RMSNorm
     """
 
     def __init__(
@@ -29,10 +32,29 @@ class PreNormBlock(nn.Module):
         max_seq_len: int = 512,
         layer_norm_eps: float = 1e-6,
         use_chain_aware_attention: bool = True,
+        norm_type: str = "layernorm",
+        pre_norm: bool = True,
+        post_norm: bool = False,
+        qk_norm: str = "none",
     ) -> None:
         super().__init__()
 
-        self.attention_norm = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.pre_norm = pre_norm
+        self.post_norm = post_norm
+
+        # Pre-normalization layers (optional)
+        self.attention_pre_norm: nn.Module | None = None
+        self.ffn_pre_norm: nn.Module | None = None
+        if pre_norm:
+            self.attention_pre_norm = create_norm_layer(norm_type, d_model, layer_norm_eps)
+            self.ffn_pre_norm = create_norm_layer(norm_type, d_model, layer_norm_eps)
+
+        # Post-normalization layers (optional)
+        self.attention_post_norm: nn.Module | None = None
+        self.ffn_post_norm: nn.Module | None = None
+        if post_norm:
+            self.attention_post_norm = create_norm_layer(norm_type, d_model, layer_norm_eps)
+            self.ffn_post_norm = create_norm_layer(norm_type, d_model, layer_norm_eps)
 
         # Select attention type based on config
         attention_cls = ChainAwareAttention if use_chain_aware_attention else MultiHeadAttention
@@ -42,9 +64,11 @@ class PreNormBlock(nn.Module):
             head_dim=head_dim,
             dropout=attention_dropout,
             max_seq_len=max_seq_len,
+            qk_norm=qk_norm,
+            norm_type=norm_type,
+            layer_norm_eps=layer_norm_eps,
         )
 
-        self.ffn_norm = nn.LayerNorm(d_model, eps=layer_norm_eps)
         self.ffn = FusedSwiGLUFFN(d_model=d_model, d_ffn=d_ffn, dropout=dropout)
         self.dropout = nn.Dropout(dropout)
 
@@ -71,28 +95,45 @@ class PreNormBlock(nn.Module):
                 Tuple of (output, attn_weights) where attn_weights has shape
                 (batch, n_heads, seq_len, seq_len)
         """
-        normed = self.attention_norm(x)
+        # Attention sublayer
+        residual = x
+        if self.pre_norm and self.attention_pre_norm is not None:
+            x = self.attention_pre_norm(x)
 
         if output_attentions:
             attn_out, attn_weights = self.attention(
-                normed, chain_ids, attention_mask, need_weights=True
+                x, chain_ids, attention_mask, need_weights=True
             )
         else:
-            attn_out = self.attention(normed, chain_ids, attention_mask, need_weights=False)
+            attn_out = self.attention(x, chain_ids, attention_mask, need_weights=False)
 
-        x = x + self.dropout(attn_out)
+        x = residual + self.dropout(attn_out)
 
-        normed = self.ffn_norm(x)
-        ffn_out = self.ffn(normed)
-        x = x + self.dropout(ffn_out)
+        if self.post_norm and self.attention_post_norm is not None:
+            x = self.attention_post_norm(x)
+
+        # FFN sublayer
+        residual = x
+        if self.pre_norm and self.ffn_pre_norm is not None:
+            x = self.ffn_pre_norm(x)
+
+        ffn_out = self.ffn(x)
+        x = residual + self.dropout(ffn_out)
+
+        if self.post_norm and self.ffn_post_norm is not None:
+            x = self.ffn_post_norm(x)
 
         if output_attentions:
             return x, attn_weights
         return x
 
 
+# Backward compatibility alias
+PreNormBlock = TransformerBlock
+
+
 class TransformerEncoder(nn.Module):
-    """Stack of pre-norm transformer blocks."""
+    """Stack of transformer blocks with configurable normalization."""
 
     def __init__(
         self,
@@ -105,12 +146,17 @@ class TransformerEncoder(nn.Module):
         attention_dropout: float = 0.0,
         max_seq_len: int = 512,
         use_chain_aware_attention: bool = True,
+        norm_type: str = "layernorm",
+        pre_norm: bool = True,
+        post_norm: bool = False,
+        qk_norm: str = "none",
+        layer_norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
 
         self.layers = nn.ModuleList(
             [
-                PreNormBlock(
+                TransformerBlock(
                     d_model=d_model,
                     n_heads=n_heads,
                     head_dim=head_dim,
@@ -118,13 +164,18 @@ class TransformerEncoder(nn.Module):
                     dropout=dropout,
                     attention_dropout=attention_dropout,
                     max_seq_len=max_seq_len,
+                    layer_norm_eps=layer_norm_eps,
                     use_chain_aware_attention=use_chain_aware_attention,
+                    norm_type=norm_type,
+                    pre_norm=pre_norm,
+                    post_norm=post_norm,
+                    qk_norm=qk_norm,
                 )
                 for _ in range(n_layers)
             ]
         )
 
-        self.final_norm = nn.LayerNorm(d_model)
+        self.final_norm = create_norm_layer(norm_type, d_model, layer_norm_eps)
 
     def forward(
         self,

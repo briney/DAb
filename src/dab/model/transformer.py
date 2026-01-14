@@ -11,6 +11,7 @@ from torch import Tensor
 
 from .embeddings import DAbEmbedding
 from .layers import TransformerEncoder
+from .normalization import RMSNorm
 
 
 @dataclass
@@ -41,6 +42,13 @@ class DAbConfig:
     # If False, use standard MultiHeadAttention
     use_chain_aware_attention: bool = True
 
+    # Normalization options
+    norm_type: str = "layernorm"  # "layernorm" or "rmsnorm"
+    pre_norm: bool = True  # Apply normalization before attention/FFN
+    post_norm: bool = False  # Apply normalization after attention/FFN
+    qk_norm: str = "none"  # "none", "norm", or "learned_scale"
+    layer_norm_eps: float = 1e-6  # Epsilon for normalization layers
+
     def __post_init__(self) -> None:
         # Validate and compute head_dim
         if self.d_model % self.n_heads != 0:
@@ -65,6 +73,24 @@ class DAbConfig:
         if self.d_ffn is None:
             self.d_ffn = int(self.d_model * self.ffn_multiplier)
             self.d_ffn = ((self.d_ffn + 63) // 64) * 64
+
+        # Validate norm_type
+        valid_norm_types = {"layernorm", "rmsnorm"}
+        if self.norm_type not in valid_norm_types:
+            raise ValueError(
+                f"norm_type must be one of {valid_norm_types}, got '{self.norm_type}'"
+            )
+
+        # Validate pre_norm/post_norm - at least one must be True
+        if not self.pre_norm and not self.post_norm:
+            raise ValueError("At least one of pre_norm or post_norm must be True")
+
+        # Validate qk_norm
+        valid_qk_norms = {"none", "norm", "learned_scale"}
+        if self.qk_norm not in valid_qk_norms:
+            raise ValueError(
+                f"qk_norm must be one of {valid_qk_norms}, got '{self.qk_norm}'"
+            )
 
 
 class DAbModel(nn.Module):
@@ -97,6 +123,11 @@ class DAbModel(nn.Module):
             attention_dropout=config.attention_dropout,
             max_seq_len=config.max_seq_len,
             use_chain_aware_attention=config.use_chain_aware_attention,
+            norm_type=config.norm_type,
+            pre_norm=config.pre_norm,
+            post_norm=config.post_norm,
+            qk_norm=config.qk_norm,
+            layer_norm_eps=config.layer_norm_eps,
         )
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
@@ -116,6 +147,8 @@ class DAbModel(nn.Module):
         elif isinstance(module, nn.LayerNorm):
             torch.nn.init.ones_(module.weight)
             torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, RMSNorm):
+            torch.nn.init.ones_(module.weight)
 
     def forward(
         self,

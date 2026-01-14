@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from dab.model import DAbConfig, DAbModel
+from dab.model.normalization import RMSNorm
 
 
 class TestDAbConfig:
@@ -22,6 +23,53 @@ class TestDAbConfig:
     def test_custom_d_ffn(self):
         config = DAbConfig(d_model=64, d_ffn=256)
         assert config.d_ffn == 256
+
+    def test_default_norm_values(self):
+        config = DAbConfig()
+        assert config.norm_type == "layernorm"
+        assert config.pre_norm is True
+        assert config.post_norm is False
+        assert config.qk_norm == "none"
+        assert config.layer_norm_eps == 1e-6
+
+    def test_invalid_norm_type(self):
+        with pytest.raises(ValueError, match="norm_type"):
+            DAbConfig(norm_type="invalid")
+
+    def test_invalid_qk_norm(self):
+        with pytest.raises(ValueError, match="qk_norm"):
+            DAbConfig(qk_norm="invalid")
+
+    def test_both_norm_false_raises(self):
+        with pytest.raises(ValueError, match="pre_norm or post_norm"):
+            DAbConfig(pre_norm=False, post_norm=False)
+
+    def test_valid_norm_configurations(self):
+        # Pre-norm only (default)
+        config = DAbConfig(pre_norm=True, post_norm=False)
+        assert config.pre_norm is True
+        assert config.post_norm is False
+
+        # Post-norm only
+        config = DAbConfig(pre_norm=False, post_norm=True)
+        assert config.pre_norm is False
+        assert config.post_norm is True
+
+        # Both pre and post norm
+        config = DAbConfig(pre_norm=True, post_norm=True)
+        assert config.pre_norm is True
+        assert config.post_norm is True
+
+    def test_rmsnorm_config(self):
+        config = DAbConfig(norm_type="rmsnorm")
+        assert config.norm_type == "rmsnorm"
+
+    def test_qk_norm_options(self):
+        config = DAbConfig(qk_norm="norm")
+        assert config.qk_norm == "norm"
+
+        config = DAbConfig(qk_norm="learned_scale")
+        assert config.qk_norm == "learned_scale"
 
 
 class TestDAbModel:
@@ -211,3 +259,161 @@ class TestDAbModel:
         assert out1["logits"].shape == out2["logits"].shape
         assert not torch.isnan(out1["logits"]).any()
         assert not torch.isnan(out2["logits"]).any()
+
+
+class TestDAbModelNormalization:
+    """Tests for DAbModel with different normalization configurations."""
+
+    @pytest.fixture
+    def base_config_kwargs(self):
+        return dict(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            max_seq_len=64,
+            dropout=0.0,
+            attention_dropout=0.0,
+            embedding_dropout=0.0,
+        )
+
+    @pytest.fixture
+    def sample_inputs(self):
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(0, 32, (batch_size, seq_len))
+        chain_ids = torch.zeros(batch_size, seq_len).long()
+        return token_ids, chain_ids
+
+    def test_rmsnorm_forward(self, base_config_kwargs, sample_inputs):
+        """Test model with RMSNorm produces valid outputs."""
+        config = DAbConfig(**base_config_kwargs, norm_type="rmsnorm")
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+        assert outputs["logits"].shape == (2, 32, 32)
+
+    def test_post_norm_forward(self, base_config_kwargs, sample_inputs):
+        """Test model with post-norm produces valid outputs."""
+        config = DAbConfig(**base_config_kwargs, pre_norm=False, post_norm=True)
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_both_norm_forward(self, base_config_kwargs, sample_inputs):
+        """Test model with both pre-norm and post-norm produces valid outputs."""
+        config = DAbConfig(**base_config_kwargs, pre_norm=True, post_norm=True)
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_qk_norm_forward(self, base_config_kwargs, sample_inputs):
+        """Test model with QK normalization produces valid outputs."""
+        config = DAbConfig(**base_config_kwargs, qk_norm="norm")
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_qk_learned_scale_forward(self, base_config_kwargs, sample_inputs):
+        """Test model with learned QK scaling produces valid outputs."""
+        config = DAbConfig(**base_config_kwargs, qk_norm="learned_scale")
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_combined_options(self, base_config_kwargs, sample_inputs):
+        """Test model with multiple normalization options combined."""
+        config = DAbConfig(
+            **base_config_kwargs,
+            norm_type="rmsnorm",
+            pre_norm=False,
+            post_norm=True,
+            qk_norm="norm",
+        )
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_rmsnorm_layer_check(self, base_config_kwargs):
+        """Test that RMSNorm layers are actually used when configured."""
+        config = DAbConfig(**base_config_kwargs, norm_type="rmsnorm")
+        model = DAbModel(config)
+
+        # Check that final_norm is RMSNorm
+        assert isinstance(model.encoder.final_norm, RMSNorm)
+
+        # Check that block norms are RMSNorm
+        block = model.encoder.layers[0]
+        assert isinstance(block.attention_pre_norm, RMSNorm)
+        assert isinstance(block.ffn_pre_norm, RMSNorm)
+
+    def test_standard_attention_with_qk_norm(self, base_config_kwargs, sample_inputs):
+        """Test standard attention (not chain-aware) with QK normalization."""
+        config = DAbConfig(
+            **base_config_kwargs,
+            use_chain_aware_attention=False,
+            qk_norm="norm",
+        )
+        model = DAbModel(config)
+
+        token_ids, chain_ids = sample_inputs
+        outputs = model(token_ids, chain_ids)
+
+        assert "logits" in outputs
+        assert not torch.isnan(outputs["logits"]).any()
+
+    def test_save_load_with_normalization(self, base_config_kwargs, sample_inputs, tmp_path):
+        """Test that models with normalization options save and load correctly."""
+        config = DAbConfig(
+            **base_config_kwargs,
+            norm_type="rmsnorm",
+            pre_norm=True,
+            post_norm=True,
+            qk_norm="learned_scale",
+        )
+        model = DAbModel(config)
+
+        save_path = tmp_path / "model_norm.pt"
+        model.save_pretrained(str(save_path))
+
+        loaded_model = DAbModel.from_pretrained(str(save_path))
+
+        # Check config matches
+        assert loaded_model.config.norm_type == "rmsnorm"
+        assert loaded_model.config.pre_norm is True
+        assert loaded_model.config.post_norm is True
+        assert loaded_model.config.qk_norm == "learned_scale"
+
+        # Check outputs match
+        token_ids, chain_ids = sample_inputs
+        model.eval()
+        loaded_model.eval()
+
+        with torch.no_grad():
+            out1 = model(token_ids, chain_ids)
+            out2 = loaded_model(token_ids, chain_ids)
+
+        assert torch.allclose(out1["logits"], out2["logits"])
