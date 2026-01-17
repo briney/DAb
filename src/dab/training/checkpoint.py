@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +32,13 @@ class CheckpointManager:
         model: torch.nn.Module,
         optimizer: Optimizer,
         scheduler: _LRScheduler | None = None,
+        model_config: Any | None = None,
     ) -> None:
         self.config = config
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.model_config = model_config
 
         self.save_dir = Path(config.save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -64,6 +66,9 @@ class CheckpointManager:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "metrics": metrics or {},
         }
+
+        if self.model_config is not None:
+            checkpoint["config"] = asdict(self.model_config)
 
         if self.scheduler is not None:
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()

@@ -223,6 +223,18 @@ class DAbModel(nn.Module):
     @classmethod
     def from_pretrained(cls, path: str, map_location: str = "cpu") -> "DAbModel":
         checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+
+        if "config" not in checkpoint:
+            raise ValueError(
+                "Checkpoint missing 'config'. This appears to be a training checkpoint "
+                "created before config was included. Use model.save_pretrained() to "
+                "create an inference checkpoint, or load manually with:\n\n"
+                "    checkpoint = torch.load('path/to/checkpoint.pt')\n"
+                "    config = DAbConfig(...)  # with your model's config\n"
+                "    model = DAbModel(config)\n"
+                "    model.load_state_dict(checkpoint['model_state_dict'])"
+            )
+
         config = DAbConfig(**checkpoint["config"])
         model = cls(config)
         model.load_state_dict(checkpoint["model_state_dict"])

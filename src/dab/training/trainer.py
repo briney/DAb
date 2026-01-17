@@ -176,11 +176,13 @@ class Trainer:
             keep_last_n=config.keep_last_n_checkpoints,
             save_best=config.save_best,
         )
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
         self.checkpoint_manager = CheckpointManager(
             checkpoint_config,
-            self.accelerator.unwrap_model(self.model),
+            unwrapped_model,
             self.optimizer,
             self.scheduler,
+            model_config=unwrapped_model.config,
         )
 
         self.metrics = MetricAccumulator()

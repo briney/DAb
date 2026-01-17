@@ -10,6 +10,7 @@ from torch import Tensor
 
 from ..data.collator import AntibodyCollator
 from ..model import DAbModel
+from ..tokenizer import tokenizer
 from .pooling import MeanMaxPooling, PoolingStrategy, create_pooling
 
 
@@ -242,3 +243,154 @@ class DAbEncoder:
         if isinstance(self.pooling, MeanMaxPooling):
             return dim * 2
         return dim
+
+    @torch.no_grad()
+    def get_logits(
+        self,
+        heavy_chain: str,
+        light_chain: str,
+    ) -> dict[str, Tensor]:
+        """Get raw logits for all positions.
+
+        Useful for likelihood scoring, perplexity computation, etc.
+
+        Parameters
+        ----------
+        heavy_chain
+            Heavy chain amino acid sequence.
+        light_chain
+            Light chain amino acid sequence.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'logits': Full logits tensor (seq_len, vocab_size)
+            - 'heavy_logits': Heavy chain logits (heavy_len, vocab_size)
+            - 'light_logits': Light chain logits (light_len, vocab_size)
+        """
+        batch = self._prepare_input(heavy_chain, light_chain)
+
+        outputs = self.model(
+            token_ids=batch["token_ids"],
+            chain_ids=batch["chain_ids"],
+            attention_mask=batch["attention_mask"],
+        )
+
+        logits = outputs["logits"][0]  # Remove batch dimension
+        chain_ids = batch["chain_ids"][0]
+        attention_mask = batch["attention_mask"][0]
+
+        # Find chain boundaries (excluding CLS at start and EOS at end)
+        seq_len = int(attention_mask.sum().item())
+        logits = logits[:seq_len]
+        chain_ids = chain_ids[:seq_len]
+
+        # Heavy chain: positions where chain_id == 0, excluding CLS (position 0)
+        heavy_mask = (chain_ids == 0)
+        heavy_mask[0] = False  # Exclude CLS
+        heavy_logits = logits[heavy_mask]
+
+        # Light chain: positions where chain_id == 1, excluding EOS (last position)
+        light_mask = (chain_ids == 1)
+        light_mask[seq_len - 1] = False  # Exclude EOS
+        light_logits = logits[light_mask]
+
+        return {
+            "logits": logits,
+            "heavy_logits": heavy_logits,
+            "light_logits": light_logits,
+        }
+
+    @torch.no_grad()
+    def predict(
+        self,
+        heavy_chain: str,
+        light_chain: str,
+        return_probs: bool = False,
+    ) -> dict[str, str | Tensor]:
+        """Predict tokens at masked positions.
+
+        Takes sequences that may contain <mask> tokens and predicts
+        the most likely amino acid at each masked position.
+
+        Parameters
+        ----------
+        heavy_chain
+            Heavy chain sequence. May contain <mask> tokens.
+        light_chain
+            Light chain sequence. May contain <mask> tokens.
+        return_probs
+            If True, also return probabilities for the predictions.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'heavy_chain': Predicted heavy chain sequence (str)
+            - 'light_chain': Predicted light chain sequence (str)
+            - 'heavy_probs': (if return_probs) Prediction probabilities for heavy chain
+            - 'light_probs': (if return_probs) Prediction probabilities for light chain
+
+        Examples
+        --------
+        >>> encoder = DAbEncoder.from_pretrained("model.pt")
+        >>> result = encoder.predict(
+        ...     heavy_chain="EVQLV<mask><mask>SGGG",
+        ...     light_chain="DIQMT"
+        ... )
+        >>> result['heavy_chain']
+        'EVQLVQSGGG'
+        """
+        batch = self._prepare_input(heavy_chain, light_chain)
+
+        outputs = self.model(
+            token_ids=batch["token_ids"],
+            chain_ids=batch["chain_ids"],
+            attention_mask=batch["attention_mask"],
+        )
+
+        logits = outputs["logits"][0]  # (seq_len, vocab_size)
+        token_ids = batch["token_ids"][0].clone()
+        chain_ids = batch["chain_ids"][0]
+        attention_mask = batch["attention_mask"][0]
+
+        seq_len = int(attention_mask.sum().item())
+
+        # Find masked positions and replace with predictions
+        mask_positions = token_ids[:seq_len] == tokenizer.mask_token_id
+        if mask_positions.any():
+            predictions = logits[:seq_len].argmax(dim=-1)
+            token_ids[:seq_len] = torch.where(
+                mask_positions, predictions, token_ids[:seq_len]
+            )
+
+        # Split into heavy and light chains
+        # Heavy: chain_id == 0, excluding CLS (position 0)
+        # Light: chain_id == 1, excluding EOS (last position)
+        heavy_mask = (chain_ids[:seq_len] == 0)
+        heavy_mask[0] = False  # Exclude CLS
+
+        light_mask = (chain_ids[:seq_len] == 1)
+        light_mask[seq_len - 1] = False  # Exclude EOS
+
+        heavy_ids = token_ids[:seq_len][heavy_mask].tolist()
+        light_ids = token_ids[:seq_len][light_mask].tolist()
+
+        # Decode to strings (join tokens without spaces)
+        heavy_seq = "".join(tokenizer.convert_ids_to_tokens(heavy_ids))
+        light_seq = "".join(tokenizer.convert_ids_to_tokens(light_ids))
+
+        result: dict[str, str | Tensor] = {
+            "heavy_chain": heavy_seq,
+            "light_chain": light_seq,
+        }
+
+        if return_probs:
+            probs = torch.softmax(logits[:seq_len], dim=-1)
+            pred_probs = probs.max(dim=-1).values
+
+            result["heavy_probs"] = pred_probs[heavy_mask]
+            result["light_probs"] = pred_probs[light_mask]
+
+        return result
