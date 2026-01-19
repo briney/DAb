@@ -533,12 +533,12 @@ class Trainer:
                                 self.logger.log(flat_metrics, step=self.global_step)
 
                     # Checkpointing - reuse eval results if already computed
+                    # Run eval on all ranks if needed (distributed dataloaders require it)
+                    if should_checkpoint and all_eval_metrics is None and self.eval_dataloaders:
+                        all_eval_metrics = self.evaluate_all()
+
                     # Only save checkpoints on main process to avoid file conflicts
                     if should_checkpoint and self.accelerator.is_main_process:
-                        # Only run eval if we haven't already at this step
-                        if all_eval_metrics is None and self.eval_dataloaders:
-                            all_eval_metrics = self.evaluate_all()
-
                         # Flatten for checkpoint manager
                         if all_eval_metrics:
                             eval_metrics = {}
@@ -551,6 +551,11 @@ class Trainer:
                         self.checkpoint_manager.save(
                             step=self.global_step, epoch=self.epoch, metrics=eval_metrics
                         )
+
+                    # Barrier after checkpointing to prevent other ranks from racing ahead
+                    # while rank 0 saves (which can take minutes for large models)
+                    if should_checkpoint:
+                        self.accelerator.wait_for_everyone()
 
                     if self.global_step >= total_steps:
                         break
