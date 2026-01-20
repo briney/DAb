@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dab"
 version = "0.1.0"
-description = "Discrete Diffusion Antibody Language Model"
+description = "Masked Language Model for Antibody Sequences"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-keywords = ["antibody", "protein", "language-model", "diffusion", "transformer"]
+keywords = ["antibody", "protein", "language-model", "mlm", "transformer"]
 
 dependencies = [
     "torch>=2.0.0",

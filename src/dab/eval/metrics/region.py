@@ -34,7 +34,6 @@ class RegionAccuracyMetric(MetricBase):
     """
 
     name: ClassVar[str] = "region_acc"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -179,7 +178,6 @@ class RegionPerplexityMetric(MetricBase):
     """
 
     name: ClassVar[str] = "region_ppl"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -315,7 +313,6 @@ class RegionLossMetric(MetricBase):
     """
 
     name: ClassVar[str] = "region_loss"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 

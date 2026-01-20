@@ -61,7 +61,6 @@ class Evaluator:
         cfg: "DictConfig",
         model: "DAbModel",
         accelerator: "Accelerator | None" = None,
-        objective: str = "diffusion",
     ) -> None:
         """Initialize the evaluator.
 
@@ -69,12 +68,10 @@ class Evaluator:
             cfg: Full configuration object.
             model: The model to evaluate.
             accelerator: Optional Accelerate accelerator instance.
-            objective: Training objective (e.g., "diffusion", "mlm").
         """
         self.cfg = cfg
         self.model = model
         self.accelerator = accelerator
-        self.objective = objective
 
         # Determine global coordinate availability
         data_cfg = cfg.get("data", {})
@@ -118,7 +115,6 @@ class Evaluator:
         if eval_name not in self._metrics_cache:
             metrics = build_metrics(
                 cfg=self.cfg,
-                objective=self.objective,
                 has_coords=self.has_coords,
                 eval_name=eval_name,
             )

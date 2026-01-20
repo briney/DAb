@@ -114,7 +114,6 @@ class PrecisionAtLMetric(MetricBase):
     """
 
     name: ClassVar[str] = "p_at_l"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = True
     needs_attentions: ClassVar[bool] = True
 

@@ -298,7 +298,6 @@ def run_training(
         cfg=cfg,
         model=model,
         accelerator=accelerator,
-        objective="mlm",
     )
     trainer.set_evaluator(evaluator)
 

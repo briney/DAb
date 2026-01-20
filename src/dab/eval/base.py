@@ -17,14 +17,11 @@ class Metric(Protocol):
 
     Class Attributes:
         name: Unique identifier for the metric (used in logging).
-        objectives: Set of training objectives this metric applies to.
-            None means the metric applies to all objectives.
         requires_coords: Whether this metric requires coordinate data.
         needs_attentions: Whether this metric needs attention weights.
     """
 
     name: ClassVar[str]
-    objectives: ClassVar[set[str] | None]
     requires_coords: ClassVar[bool]
     needs_attentions: ClassVar[bool]
 
@@ -89,14 +86,11 @@ class MetricBase(ABC):
 
     Class Attributes:
         name: Unique identifier for the metric.
-        objectives: Set of training objectives this metric applies to.
-            None means the metric applies to all objectives.
         requires_coords: Whether this metric requires coordinate data.
         needs_attentions: Whether this metric needs attention weights.
     """
 
     name: ClassVar[str] = ""
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 

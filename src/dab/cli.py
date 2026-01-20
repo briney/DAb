@@ -12,7 +12,7 @@ from .version import __version__
 @click.group()
 @click.version_option(version=__version__)
 def main() -> None:
-    """DAb: Discrete Diffusion Antibody Language Model."""
+    """DAb: Discrete Antibody Language Model."""
     pass
 
 

@@ -186,7 +186,6 @@ class ChainProbeMetric(ProbeMetricBase):
     """
 
     name: ClassVar[str] = "chain_probe"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -288,7 +287,6 @@ class PositionProbeMetric(ProbeMetricBase):
     """
 
     name: ClassVar[str] = "position_probe"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -381,7 +379,6 @@ class CDRProbeMetric(ProbeMetricBase):
     """
 
     name: ClassVar[str] = "cdr_probe"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 

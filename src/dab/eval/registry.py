@@ -163,7 +163,6 @@ def _get_dataset_has_coords(
 
 def build_metrics(
     cfg: "DictConfig",
-    objective: str = "diffusion",
     has_coords: bool = False,
     eval_name: str | None = None,
 ) -> list[Metric]:
@@ -171,13 +170,12 @@ def build_metrics(
 
     Args:
         cfg: Full configuration object.
-        objective: Current training objective (e.g., "diffusion", "mlm").
         has_coords: Whether coordinate data is available (global default).
         eval_name: Optional eval dataset name for per-dataset metric overrides.
 
     Returns:
         List of instantiated Metric objects that are enabled and compatible
-        with the current objective and available resources.
+        with available resources.
     """
     # Import metrics to ensure they're registered
     # This import is deferred to avoid circular imports
@@ -196,11 +194,6 @@ def build_metrics(
         if not metric_cfg.get("enabled", True):
             continue
 
-        # Check objective compatibility
-        cls_objectives = getattr(cls, "objectives", None)
-        if cls_objectives is not None and objective not in cls_objectives:
-            continue
-
         # Check resource requirements (using per-dataset has_coords)
         if getattr(cls, "requires_coords", False) and not dataset_has_coords:
             continue
@@ -209,7 +202,7 @@ def build_metrics(
         init_kwargs = {
             k: v
             for k, v in metric_cfg.items()
-            if k not in ("enabled", "objectives", "requires_coords", "needs_attentions")
+            if k not in ("enabled", "requires_coords", "needs_attentions")
         }
 
         # Resolve dynamic num_layers for p_at_l metric (null -> 10% of encoder layers)

@@ -1,4 +1,4 @@
-"""DAb: Discrete Diffusion Antibody Language Model."""
+"""DAb: Discrete Antibody Language Model."""
 
 from .encoding import DAbEncoder
 from .model import DAbConfig, DAbModel

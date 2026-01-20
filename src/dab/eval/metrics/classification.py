@@ -13,14 +13,13 @@ from ..registry import register_metric
 
 @register_metric("masked_accuracy")
 class MaskedAccuracyMetric(MetricBase):
-    """Masked token accuracy for diffusion/MLM pre-training.
+    """Masked token accuracy for MLM pre-training.
 
     Computes the fraction of correctly predicted masked tokens, ignoring
     positions marked with the ignore_index or not masked.
     """
 
     name: ClassVar[str] = "mask_acc"
-    objectives: ClassVar[set[str] | None] = None  # Works for all objectives
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -91,7 +90,6 @@ class PerplexityMetric(MetricBase):
     """
 
     name: ClassVar[str] = "ppl"
-    objectives: ClassVar[set[str] | None] = None  # Works for all objectives
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 
@@ -173,7 +171,6 @@ class LossMetric(MetricBase):
     """
 
     name: ClassVar[str] = "loss"
-    objectives: ClassVar[set[str] | None] = None
     requires_coords: ClassVar[bool] = False
     needs_attentions: ClassVar[bool] = False
 

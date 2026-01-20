@@ -53,7 +53,7 @@ DEFAULT_VOCAB = [
     "Z",  # Glutamine or Glutamic acid
     ".",  # 29: Insertion marker
     "-",  # 30: Gap marker
-    "<mask>",  # 31: Mask token for diffusion
+    "<mask>",  # 31: Mask token for MLM
 ]
 
 # Amino acid range (for sampling during generation)
@@ -84,7 +84,7 @@ class Tokenizer(PreTrainedTokenizerFast):
     pad_token
         Padding token. Default is "<pad>".
     mask_token
-        Mask token for diffusion. Default is "<mask>".
+        Mask token for MLM. Default is "<mask>".
     **kwargs
         Additional arguments passed to PreTrainedTokenizerFast.
 
