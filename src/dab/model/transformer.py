@@ -256,6 +256,19 @@ class DAbModel(nn.Module):
             indices_to_remove = sorted_mask.scatter(-1, sorted_indices, sorted_mask)
             logits = logits.masked_fill(indices_to_remove, float("-inf"))
 
+        # Prevent sampling special tokens (CLS, PAD, EOS, UNK, MASK)
+        # These should never be valid predictions
+        special_tokens = [
+            tokenizer.cls_token_id,
+            tokenizer.pad_token_id,
+            tokenizer.eos_token_id,
+            tokenizer.unk_token_id,
+            tokenizer.mask_token_id,
+        ]
+        for token_id in special_tokens:
+            if token_id is not None:
+                logits[..., token_id] = float("-inf")
+
         # Sample from distribution
         probs = torch.softmax(logits, dim=-1)
         batch_size, seq_len, vocab_size = probs.shape
