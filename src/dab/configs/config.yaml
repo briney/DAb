@@ -2,7 +2,7 @@ defaults:
   - model: base
   - train: default
   - data: default
-  - diffusion: default
+  - masking: default
   - log: default
   - eval: default
   - _self_

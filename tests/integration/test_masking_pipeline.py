@@ -1,15 +1,9 @@
-"""Integration tests for the diffusion pipeline."""
+"""Integration tests for the masking pipeline."""
 
 import pytest
 import torch
 
-from dab.diffusion import (
-    CosineSchedule,
-    DiffusionSampler,
-    InformationWeightedMasker,
-    UniformMasker,
-    create_schedule,
-)
+from dab.masking import InformationWeightedMasker, UniformMasker
 from dab.model import DAbConfig, DAbModel
 from dab.tokenizer import tokenizer
 from dab.training import compute_masked_cross_entropy
@@ -24,18 +18,11 @@ def model():
         n_layers=2,
         n_heads=2,
         max_seq_len=128,
-        max_timesteps=100,
         dropout=0.0,
         attention_dropout=0.0,
         embedding_dropout=0.0,
     )
     return DAbModel(config)
-
-
-@pytest.fixture
-def noise_schedule():
-    """Create a cosine noise schedule."""
-    return create_schedule("cosine", num_timesteps=100)
 
 
 @pytest.fixture
@@ -71,19 +58,14 @@ def sample_batch():
     }
 
 
-class TestDiffusionTrainingStep:
-    def test_uniform_masking_forward_loss(self, model, noise_schedule, sample_batch):
+class TestMLMTrainingStep:
+    def test_uniform_masking_forward_loss(self, model, sample_batch):
         """Test full training step with uniform masking."""
-        masker = UniformMasker(noise_schedule)
-
-        # Sample timesteps
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+        masker = UniformMasker(mask_rate=0.15)
 
         # Apply masking
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
         )
@@ -106,25 +88,19 @@ class TestDiffusionTrainingStep:
         assert loss > 0
         assert not torch.isnan(loss)
 
-    def test_information_weighted_masking_forward_loss(
-        self, model, noise_schedule, sample_batch
-    ):
+    def test_information_weighted_masking_forward_loss(self, model, sample_batch):
         """Test full training step with information-weighted masking."""
-        # Set seed for reproducibility - ensures timesteps aren't too low
-        # (very low timesteps → near-zero mask rate → no masked tokens → zero loss)
         torch.manual_seed(42)
 
         masker = InformationWeightedMasker(
-            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=1.0
+            mask_rate=0.15,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
         )
-
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
 
         # Apply masking with CDR weighting
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             cdr_mask=sample_batch["cdr_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
@@ -147,14 +123,12 @@ class TestDiffusionTrainingStep:
         assert loss.ndim == 0
         assert loss > 0
 
-    def test_training_step_gradient_update(self, model, noise_schedule, sample_batch):
+    def test_training_step_gradient_update(self, model, sample_batch):
         """Test that a training step updates parameters."""
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-        masker = UniformMasker(noise_schedule)
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
+        masker = UniformMasker(mask_rate=0.15)
 
         # Get initial parameters
         initial_params = {
@@ -164,7 +138,6 @@ class TestDiffusionTrainingStep:
         # Training step
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
         )
@@ -194,23 +167,19 @@ class TestDiffusionTrainingStep:
 
         assert params_changed
 
-    def test_sampled_masking_forward_loss(self, model, noise_schedule, sample_batch):
+    def test_sampled_masking_forward_loss(self, model, sample_batch):
         """Test training step with Gumbel-top-k sampled masking produces valid loss."""
         torch.manual_seed(42)
 
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
         )
 
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             cdr_mask=sample_batch["cdr_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
@@ -232,23 +201,19 @@ class TestDiffusionTrainingStep:
         assert loss > 0
         assert not torch.isnan(loss)
 
-    def test_ranked_masking_forward_loss(self, model, noise_schedule, sample_batch):
+    def test_ranked_masking_forward_loss(self, model, sample_batch):
         """Test training step with ranked masking produces valid loss."""
         torch.manual_seed(42)
 
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="ranked",
         )
 
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             cdr_mask=sample_batch["cdr_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
@@ -271,22 +236,17 @@ class TestDiffusionTrainingStep:
         assert not torch.isnan(loss)
 
     @pytest.mark.parametrize("selection_method", ["sampled", "ranked"])
-    def test_selection_method_gradient_update(
-        self, model, noise_schedule, sample_batch, selection_method
-    ):
+    def test_selection_method_gradient_update(self, model, sample_batch, selection_method):
         """Test that both selection methods update model parameters correctly."""
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method=selection_method,
         )
-
-        batch_size = sample_batch["token_ids"].shape[0]
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
 
         initial_params = {
             name: param.clone() for name, param in model.named_parameters()
@@ -294,7 +254,6 @@ class TestDiffusionTrainingStep:
 
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=sample_batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=sample_batch["attention_mask"],
             cdr_mask=sample_batch["cdr_mask"],
             special_tokens_mask=sample_batch["special_tokens_mask"],
@@ -325,90 +284,85 @@ class TestDiffusionTrainingStep:
         assert params_changed, f"Parameters should change with {selection_method} selection"
 
 
-class TestDiffusionSampling:
-    def test_sampling_pipeline(self, model, noise_schedule, sample_batch):
-        """Test the full sampling pipeline."""
+class TestPredictMasked:
+    def test_predict_masked_fills_masks(self, model, sample_batch):
+        """Test that predict_masked fills in mask tokens."""
         model.eval()
-        sampler = DiffusionSampler(noise_schedule)
 
-        # Get dimensions from sample batch
-        batch_size = 1
-        seq_len = sample_batch["token_ids"].shape[1]
-        chain_ids = sample_batch["chain_ids"][0:1]
-
-        # Sample from scratch
-        with torch.no_grad():
-            sampled = sampler.sample(
-                model=model,
-                batch_size=batch_size,
-                seq_len=seq_len,
-                chain_ids=chain_ids,
-                num_steps=10,
-                show_progress=False,
-            )
-
-        # Check output shape and that tokens are valid
-        assert sampled.shape == (batch_size, seq_len)
-        assert (sampled >= 0).all()
-        assert (sampled < 32).all()
-
-    def test_conditional_sampling_preserves_context(
-        self, model, noise_schedule, sample_batch
-    ):
-        """Test that conditional sampling preserves unmasked tokens."""
-        model.eval()
-        sampler = DiffusionSampler(noise_schedule)
-
+        # Create input with some mask tokens
         token_ids = sample_batch["token_ids"][0:1].clone()
         chain_ids = sample_batch["chain_ids"][0:1]
 
-        # Create mask for positions 5-15
-        mask_positions = torch.zeros_like(token_ids, dtype=torch.bool)
-        mask_positions[0, 5:15] = True
+        # Mask positions 5-10
         original_tokens = token_ids.clone()
+        token_ids[0, 5:10] = tokenizer.mask_token_id
 
         with torch.no_grad():
-            sampled = sampler.sample_conditional(
-                model=model,
+            predicted = model.predict_masked(
                 token_ids=token_ids,
                 chain_ids=chain_ids,
-                mask_positions=mask_positions,
-                num_steps=10,
-                show_progress=False,
             )
+
+        # Check that at least some masked positions are filled
+        # (with an untrained model, some might still be mask tokens)
+        mask_positions = predicted[0, 5:10]
+        assert (mask_positions != tokenizer.mask_token_id).any(), "At least some masks should be filled"
 
         # Check that unmasked positions are preserved
-        assert torch.equal(sampled[0, :5], original_tokens[0, :5])
-        assert torch.equal(sampled[0, 15:], original_tokens[0, 15:])
+        assert torch.equal(predicted[0, :5], original_tokens[0, :5])
+        assert torch.equal(predicted[0, 10:], original_tokens[0, 10:])
 
+    def test_predict_masked_with_temperature(self, model, sample_batch):
+        """Test predict_masked with temperature parameter."""
+        model.eval()
 
-class TestNoiseScheduleIntegration:
-    def test_all_schedule_types_work(self, model, sample_batch):
-        """Test that all noise schedule types work in the pipeline."""
-        for schedule_type in ["linear", "cosine", "sqrt"]:
-            schedule = create_schedule(schedule_type, num_timesteps=50)
-            masker = UniformMasker(schedule)
+        token_ids = sample_batch["token_ids"][0:1].clone()
+        chain_ids = sample_batch["chain_ids"][0:1]
+        token_ids[0, 5:10] = tokenizer.mask_token_id
 
-            batch_size = sample_batch["token_ids"].shape[0]
-            timesteps = schedule.sample_timesteps(batch_size, device="cpu")
-
-            masked_ids, mask_labels = masker.apply_mask(
-                token_ids=sample_batch["token_ids"],
-                timesteps=timesteps,
-                attention_mask=sample_batch["attention_mask"],
-                special_tokens_mask=sample_batch["special_tokens_mask"],
+        with torch.no_grad():
+            # Low temperature should be more deterministic
+            predicted_low_temp = model.predict_masked(
+                token_ids=token_ids.clone(),
+                chain_ids=chain_ids,
+                temperature=0.1,
+            )
+            # High temperature should be more random
+            predicted_high_temp = model.predict_masked(
+                token_ids=token_ids.clone(),
+                chain_ids=chain_ids,
+                temperature=2.0,
             )
 
-            outputs = model(
-                token_ids=masked_ids,
-                chain_ids=sample_batch["chain_ids"],
-                attention_mask=sample_batch["attention_mask"],
-            )
+        # Both should produce valid outputs
+        assert (predicted_low_temp >= 0).all()
+        assert (predicted_high_temp >= 0).all()
+        assert (predicted_low_temp < 32).all()
+        assert (predicted_high_temp < 32).all()
 
-            loss = compute_masked_cross_entropy(
-                logits=outputs["logits"],
-                targets=sample_batch["token_ids"],
-                mask_labels=mask_labels,
-            )
 
-            assert not torch.isnan(loss), f"NaN loss for schedule type: {schedule_type}"
+class TestMaskRateVariations:
+    @pytest.mark.parametrize("mask_rate", [0.05, 0.15, 0.30, 0.50])
+    def test_different_mask_rates(self, model, sample_batch, mask_rate):
+        """Test that different mask rates work correctly."""
+        masker = UniformMasker(mask_rate=mask_rate)
+
+        masked_ids, mask_labels = masker.apply_mask(
+            token_ids=sample_batch["token_ids"],
+            attention_mask=sample_batch["attention_mask"],
+            special_tokens_mask=sample_batch["special_tokens_mask"],
+        )
+
+        outputs = model(
+            token_ids=masked_ids,
+            chain_ids=sample_batch["chain_ids"],
+            attention_mask=sample_batch["attention_mask"],
+        )
+
+        loss = compute_masked_cross_entropy(
+            logits=outputs["logits"],
+            targets=sample_batch["token_ids"],
+            mask_labels=mask_labels,
+        )
+
+        assert not torch.isnan(loss), f"NaN loss for mask_rate: {mask_rate}"

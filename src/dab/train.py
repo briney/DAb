@@ -12,7 +12,6 @@ from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 
 from .data import create_eval_dataloaders, create_train_dataloader
-from .diffusion import create_schedule
 from .eval import Evaluator
 from .logging import WandbLogger
 from .model import DAbConfig, DAbModel
@@ -229,8 +228,6 @@ def run_training(
         d_ffn=cfg.model.d_ffn,
         ffn_multiplier=cfg.model.ffn_multiplier,
         max_seq_len=cfg.model.max_seq_len,
-        max_timesteps=cfg.model.max_timesteps,
-        use_timestep_embedding=cfg.model.use_timestep_embedding,
         dropout=cfg.model.dropout,
         attention_dropout=cfg.model.attention_dropout,
         embedding_dropout=cfg.model.embedding_dropout,
@@ -251,13 +248,7 @@ def run_training(
         default_batch_size=cfg.train.batch_size,
     )
 
-    # Create noise schedule and training config
-    noise_schedule = create_schedule(
-        cfg.diffusion.schedule_type,
-        cfg.diffusion.num_timesteps,
-        mask_rate=cfg.diffusion.mask_rate,
-    )
-
+    # Create training config
     training_config = TrainingConfig(
         max_steps=cfg.train.max_steps,
         max_epochs=cfg.train.max_epochs,
@@ -270,18 +261,11 @@ def run_training(
         scheduler_decay=cfg.train.scheduler.decay,
         warmup_steps=cfg.train.scheduler.warmup_steps,
         min_lr_ratio=cfg.train.scheduler.min_lr_ratio,
-        noise_schedule=cfg.diffusion.schedule_type,
-        num_timesteps=cfg.diffusion.num_timesteps,
-        power=cfg.diffusion.power,
-        cdr_weight_multiplier=cfg.diffusion.cdr_weight_multiplier,
-        nongermline_weight_multiplier=cfg.diffusion.nongermline_weight_multiplier,
-        use_information_weighted_masking=cfg.diffusion.use_information_weighted_masking,
-        masking_selection=cfg.diffusion.masking_selection,
-        use_curriculum=cfg.diffusion.use_curriculum,
-        curriculum_start=cfg.diffusion.curriculum_start,
-        loss_objective=cfg.diffusion.loss_objective,
-        nelbo_weight_normalize=cfg.diffusion.nelbo_weight_normalize,
-        nelbo_weight_clip_max=cfg.diffusion.nelbo_weight_clip_max,
+        mask_rate=cfg.masking.mask_rate,
+        cdr_weight_multiplier=cfg.masking.cdr_weight_multiplier,
+        nongermline_weight_multiplier=cfg.masking.nongermline_weight_multiplier,
+        use_information_weighted_masking=cfg.masking.use_information_weighted_masking,
+        masking_selection=cfg.masking.masking_selection,
         log_steps=cfg.train.log_steps,
         eval_steps=cfg.train.eval_steps,
         checkpoint_steps=cfg.train.checkpoint_steps,
@@ -304,7 +288,6 @@ def run_training(
         model=model,
         train_dataloader=train_loader,
         eval_dataloaders=eval_dataloaders if eval_dataloaders else None,
-        noise_schedule=noise_schedule,
         accelerator=accelerator,
         masking_frequency_config=masking_frequency_config,
         flops_config=flops_config,
@@ -315,7 +298,7 @@ def run_training(
         cfg=cfg,
         model=model,
         accelerator=accelerator,
-        objective="diffusion",
+        objective="mlm",
     )
     trainer.set_evaluator(evaluator)
 

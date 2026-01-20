@@ -10,7 +10,7 @@ import torch
 
 from dab import DAbConfig, DAbEncoder, DAbModel
 from dab.data import create_dataloader
-from dab.diffusion import DiffusionSampler, UniformMasker, create_schedule
+from dab.masking import UniformMasker
 from dab.tokenizer import tokenizer
 from dab.training import compute_masked_cross_entropy, create_optimizer
 
@@ -49,7 +49,6 @@ def trained_model(sample_data, tmp_path):
         n_layers=1,
         n_heads=1,
         max_seq_len=128,
-        max_timesteps=50,
         dropout=0.0,
     )
     model = DAbModel(config)
@@ -63,18 +62,13 @@ def trained_model(sample_data, tmp_path):
         num_workers=0,
     )
     optimizer = create_optimizer(model, lr=1e-3)
-    noise_schedule = create_schedule("cosine", num_timesteps=50)
-    masker = UniformMasker(noise_schedule)
+    masker = UniformMasker(mask_rate=0.15)
 
     # Train for a few steps
     for epoch in range(2):
         for batch in dataloader:
-            batch_size = batch["token_ids"].shape[0]
-            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
             masked_ids, mask_labels = masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 special_tokens_mask=batch["special_tokens_mask"],
             )
@@ -137,13 +131,10 @@ class TestTrainEncodeGenerate:
         assert embeddings.shape == (3, 32)
         assert not torch.isnan(embeddings).any()
 
-    def test_sampling_with_trained_model(self, trained_model):
-        """Test sequence sampling with a trained model."""
+    def test_predict_masked_with_trained_model(self, trained_model):
+        """Test masked prediction with a trained model."""
         model = DAbModel.from_pretrained(trained_model)
         model.eval()
-
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        sampler = DiffusionSampler(noise_schedule)
 
         # Start with a partially masked sequence
         heavy = "EVQLVESGGGLVQ"
@@ -158,27 +149,29 @@ class TestTrainEncodeGenerate:
         token_ids = torch.tensor([tokens])
         chain_ids = torch.tensor([chains])
 
-        # Create mask for CDR-like region (positions 5-10)
-        mask_positions = torch.zeros_like(token_ids, dtype=torch.bool)
-        mask_positions[0, 5:10] = True
+        # Mask CDR-like region (positions 5-10)
+        masked_ids = token_ids.clone()
+        masked_ids[0, 5:10] = tokenizer.mask_token_id
 
-        # Sample conditionally
+        # Predict masked positions
         with torch.no_grad():
-            sampled = sampler.sample_conditional(
-                model=model,
-                token_ids=token_ids,
+            predicted = model.predict_masked(
+                token_ids=masked_ids,
                 chain_ids=chain_ids,
-                mask_positions=mask_positions,
-                num_steps=10,
-                show_progress=False,
             )
 
         # Check that we got valid amino acids
-        assert sampled.shape == token_ids.shape
-        assert (sampled >= 0).all() and (sampled < 32).all()
+        assert predicted.shape == token_ids.shape
+        assert (predicted >= 0).all() and (predicted < 32).all()
+
+        # Masked positions should be filled (not all mask tokens)
+        mask_positions = masked_ids == tokenizer.mask_token_id
+        predicted_at_mask = predicted[mask_positions]
+        # At least some predictions should not be mask token
+        assert (predicted_at_mask != tokenizer.mask_token_id).any()
 
         # Decode and verify it's valid
-        decoded = tokenizer.decode(sampled[0].tolist())
+        decoded = tokenizer.decode(predicted[0].tolist())
         assert len(decoded) > 0
 
 

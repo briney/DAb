@@ -4,13 +4,12 @@ from .checkpoint import CheckpointConfig, CheckpointManager
 from .flops import FLOPsConfig, FLOPsTracker
 from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
 from .metrics import (
-    DiffusionMetrics,
+    MLMMetrics,
     MetricAccumulator,
     compute_accuracy,
-    compute_diffusion_metrics,
     compute_masked_cross_entropy,
+    compute_mlm_metrics,
     compute_perplexity,
-    compute_weighted_masked_cross_entropy,
 )
 from .optimizer import create_optimizer, create_scheduler, get_lr
 from .trainer import Trainer, TrainingConfig
@@ -27,12 +26,11 @@ __all__ = [
     "MaskingFrequencyTracker",
     # Metrics
     "MetricAccumulator",
-    "DiffusionMetrics",
+    "MLMMetrics",
     "compute_masked_cross_entropy",
-    "compute_weighted_masked_cross_entropy",
     "compute_accuracy",
     "compute_perplexity",
-    "compute_diffusion_metrics",
+    "compute_mlm_metrics",
     # Optimizer
     "create_optimizer",
     "create_scheduler",

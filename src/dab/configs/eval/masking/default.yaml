@@ -6,18 +6,8 @@
 # - information_weighted: Biased toward CDR and non-templated regions
 type: uniform
 
-# Schedule type: "static", "cosine", "linear", "sqrt"
-# - static: Fixed mask rate (ignores timesteps), like traditional MLM
-# - cosine/linear/sqrt: Dynamic mask rate based on sampled timesteps
-schedule: static
-
 # Mask rate (0.0-1.0)
-# Used when schedule=static; for dynamic schedules, timesteps determine rate
 mask_rate: 0.15
-
-# Number of timesteps for diffusion schedules
-# Only used when schedule != static
-num_timesteps: 100
 
 # Weight multipliers for information-weighted masking
 # Only used when type=information_weighted

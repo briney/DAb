@@ -16,7 +16,6 @@ def tiny_model():
         n_layers=1,
         n_heads=1,
         max_seq_len=32,
-        max_timesteps=10,
     )
     return DAbModel(config)
 

@@ -3,24 +3,21 @@
 import pytest
 import torch
 
-from dab.diffusion.masking import InformationWeightedMasker, UniformMasker
-from dab.diffusion.noise_schedule import LinearSchedule
+from dab.masking import InformationWeightedMasker, UniformMasker
 from dab.tokenizer import tokenizer
 
 
 class TestUniformMasker:
     @pytest.fixture
     def masker(self):
-        schedule = LinearSchedule(num_timesteps=100)
-        return UniformMasker(noise_schedule=schedule)
+        return UniformMasker(mask_rate=0.5)
 
     def test_apply_mask_shape(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([50, 50])
         attention_mask = torch.ones(batch_size, seq_len)
 
-        masked_ids, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
+        masked_ids, mask_labels = masker.apply_mask(token_ids, attention_mask)
 
         assert masked_ids.shape == token_ids.shape
         assert mask_labels.shape == token_ids.shape
@@ -28,10 +25,9 @@ class TestUniformMasker:
     def test_masked_positions_have_mask_token(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([100, 100])  # High mask rate
         attention_mask = torch.ones(batch_size, seq_len)
 
-        masked_ids, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
+        masked_ids, mask_labels = masker.apply_mask(token_ids, attention_mask)
 
         # Where mask_labels is True, masked_ids should be MASK_IDX
         assert (masked_ids[mask_labels] == tokenizer.mask_token_id).all()
@@ -39,11 +35,10 @@ class TestUniformMasker:
     def test_respects_attention_mask(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([100, 100])
         attention_mask = torch.ones(batch_size, seq_len)
         attention_mask[:, -10:] = 0  # Last 10 positions are padding
 
-        _, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
+        _, mask_labels = masker.apply_mask(token_ids, attention_mask)
 
         # Padding positions should not be masked
         assert not mask_labels[:, -10:].any()
@@ -53,27 +48,35 @@ class TestUniformMasker:
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
         token_ids[:, 0] = tokenizer.cls_token_id
         token_ids[:, -1] = tokenizer.eos_token_id
-        timesteps = torch.tensor([100, 100])
         attention_mask = torch.ones(batch_size, seq_len)
         special_tokens_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         special_tokens_mask[:, 0] = True
         special_tokens_mask[:, -1] = True
 
         _, mask_labels = masker.apply_mask(
-            token_ids, timesteps, attention_mask, special_tokens_mask=special_tokens_mask
+            token_ids, attention_mask, special_tokens_mask=special_tokens_mask
         )
 
         # Special token positions should not be masked
         assert not mask_labels[:, 0].any()
         assert not mask_labels[:, -1].any()
 
+    def test_mask_rate_validation(self):
+        with pytest.raises(ValueError):
+            UniformMasker(mask_rate=0.0)
+        with pytest.raises(ValueError):
+            UniformMasker(mask_rate=1.0)
+        with pytest.raises(ValueError):
+            UniformMasker(mask_rate=-0.1)
+        with pytest.raises(ValueError):
+            UniformMasker(mask_rate=1.5)
+
 
 class TestInformationWeightedMasker:
     @pytest.fixture
     def masker(self):
-        schedule = LinearSchedule(num_timesteps=100)
         return InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.5,
             cdr_weight_multiplier=1.0,
             nongermline_weight_multiplier=1.0,
         )
@@ -81,10 +84,9 @@ class TestInformationWeightedMasker:
     def test_apply_mask_shape(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([50, 50])
         attention_mask = torch.ones(batch_size, seq_len)
 
-        masked_ids, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
+        masked_ids, mask_labels = masker.apply_mask(token_ids, attention_mask)
 
         assert masked_ids.shape == token_ids.shape
         assert mask_labels.shape == token_ids.shape
@@ -141,11 +143,9 @@ class TestInformationWeightedMasker:
 
     def test_separate_cdr_and_nongermline_multipliers(self):
         """Test that CDR and nongermline multipliers are applied independently."""
-        schedule = LinearSchedule(num_timesteps=100)
-
         # Create masker with higher CDR weight
         masker_high_cdr = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.5,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=0.5,
         )
@@ -172,9 +172,8 @@ class TestInformationWeightedMasker:
 
     def test_zero_cdr_multiplier(self):
         """Test that zero CDR multiplier gives CDR same weight as framework."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.5,
             cdr_weight_multiplier=0.0,
             nongermline_weight_multiplier=1.0,
         )
@@ -194,9 +193,8 @@ class TestInformationWeightedMasker:
 
     def test_high_nongermline_multiplier(self):
         """Test that high nongermline multiplier increases nongermline weight."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.5,
             cdr_weight_multiplier=1.0,
             nongermline_weight_multiplier=5.0,
         )
@@ -219,29 +217,34 @@ class TestInformationWeightedMasker:
     def test_respects_special_tokens_mask(self, masker):
         batch_size, seq_len = 2, 32
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([100, 100])
         attention_mask = torch.ones(batch_size, seq_len)
         special_tokens_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         special_tokens_mask[:, 0] = True
 
         _, mask_labels = masker.apply_mask(
-            token_ids, timesteps, attention_mask, special_tokens_mask=special_tokens_mask
+            token_ids, attention_mask, special_tokens_mask=special_tokens_mask
         )
 
         assert not mask_labels[:, 0].any()
 
-    def test_mask_count_matches_rate(self, masker):
+    def test_mask_count_matches_rate(self):
+        masker = InformationWeightedMasker(mask_rate=0.5)
         batch_size, seq_len = 4, 100
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([50, 50, 50, 50])  # 50% mask rate
         attention_mask = torch.ones(batch_size, seq_len)
 
-        _, mask_labels = masker.apply_mask(token_ids, timesteps, attention_mask)
+        _, mask_labels = masker.apply_mask(token_ids, attention_mask)
 
         # Should mask approximately 50 tokens per sequence
         mask_counts = mask_labels.sum(dim=-1)
         assert (mask_counts >= 40).all()  # Allow some tolerance
         assert (mask_counts <= 60).all()
+
+    def test_mask_rate_validation(self):
+        with pytest.raises(ValueError):
+            InformationWeightedMasker(mask_rate=0.0)
+        with pytest.raises(ValueError):
+            InformationWeightedMasker(mask_rate=1.0)
 
 
 class TestGumbelSampling:
@@ -249,9 +252,8 @@ class TestGumbelSampling:
 
     def test_sampled_is_stochastic(self):
         """Test that sampled selection produces different outputs across runs."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.3,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
@@ -259,7 +261,6 @@ class TestGumbelSampling:
 
         batch_size, seq_len = 2, 50
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([30, 30])
         attention_mask = torch.ones(batch_size, seq_len)
         cdr_mask = torch.zeros(batch_size, seq_len)
         cdr_mask[:, 10:20] = 1  # CDR positions
@@ -268,7 +269,7 @@ class TestGumbelSampling:
         results = []
         for _ in range(10):
             _, mask_labels = masker.apply_mask(
-                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+                token_ids, attention_mask, cdr_mask=cdr_mask
             )
             results.append(mask_labels.clone())
 
@@ -278,9 +279,8 @@ class TestGumbelSampling:
 
     def test_ranked_is_deterministic(self):
         """Test that ranked selection produces consistent high-weight position masking."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.1,  # Low mask rate
             cdr_weight_multiplier=10.0,  # Very high weight to ensure CDR always selected first
             nongermline_weight_multiplier=1.0,
             selection_method="ranked",
@@ -288,7 +288,6 @@ class TestGumbelSampling:
 
         batch_size, seq_len = 2, 50
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([10, 10])  # Low mask rate = ~5 positions
         attention_mask = torch.ones(batch_size, seq_len)
         cdr_mask = torch.zeros(batch_size, seq_len)
         cdr_mask[:, 10:20] = 1  # 10 CDR positions (more than we'll mask)
@@ -297,11 +296,10 @@ class TestGumbelSampling:
         # the masked positions should always be within CDR region
         for _ in range(5):
             _, mask_labels = masker.apply_mask(
-                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+                token_ids, attention_mask, cdr_mask=cdr_mask
             )
             # All masked positions should be CDR positions (10-19)
             cdr_region = mask_labels[:, 10:20]
-            non_cdr_region = torch.cat([mask_labels[:, :10], mask_labels[:, 20:]], dim=1)
 
             # With ranked selection and high weight, all masks should be in CDR
             total_masked = mask_labels.sum()
@@ -312,9 +310,8 @@ class TestGumbelSampling:
 
     def test_sampled_respects_weights(self):
         """Test that higher-weight positions are masked more often on average."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=3.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
@@ -322,7 +319,6 @@ class TestGumbelSampling:
 
         batch_size, seq_len = 4, 100
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([15, 15, 15, 15])  # 15% mask rate
         attention_mask = torch.ones(batch_size, seq_len)
 
         # CDR at positions 10-20 (10 positions)
@@ -336,7 +332,7 @@ class TestGumbelSampling:
 
         for _ in range(num_trials):
             _, mask_labels = masker.apply_mask(
-                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+                token_ids, attention_mask, cdr_mask=cdr_mask
             )
             cdr_masked = mask_labels[:, 10:20].sum().item()
             fw_masked = mask_labels[:, :10].sum().item() + mask_labels[:, 20:].sum().item()
@@ -353,9 +349,8 @@ class TestGumbelSampling:
 
     def test_sampled_allows_low_weight_positions(self):
         """Test that framework positions can still be masked with sampled selection."""
-        schedule = LinearSchedule(num_timesteps=100)
         masker = InformationWeightedMasker(
-            noise_schedule=schedule,
+            mask_rate=0.2,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
@@ -363,7 +358,6 @@ class TestGumbelSampling:
 
         batch_size, seq_len = 4, 100
         token_ids = torch.randint(4, 28, (batch_size, seq_len))
-        timesteps = torch.tensor([20, 20, 20, 20])  # 20% mask rate
         attention_mask = torch.ones(batch_size, seq_len)
 
         # Small CDR region (only 5 positions)
@@ -375,7 +369,7 @@ class TestGumbelSampling:
         fw_masked_ever = False
         for _ in range(20):
             _, mask_labels = masker.apply_mask(
-                token_ids, timesteps, attention_mask, cdr_mask=cdr_mask
+                token_ids, attention_mask, cdr_mask=cdr_mask
             )
             # Check if any FW positions (not 10-14) were masked
             fw_positions = torch.cat([mask_labels[:, :10], mask_labels[:, 15:]], dim=1)
@@ -387,11 +381,9 @@ class TestGumbelSampling:
 
     def test_selection_method_validation(self):
         """Test that invalid selection_method raises ValueError."""
-        schedule = LinearSchedule(num_timesteps=100)
-
         with pytest.raises(ValueError, match="selection_method must be"):
             InformationWeightedMasker(
-                noise_schedule=schedule,
+                mask_rate=0.15,
                 cdr_weight_multiplier=1.0,
                 nongermline_weight_multiplier=1.0,
                 selection_method="invalid",
@@ -399,6 +391,5 @@ class TestGumbelSampling:
 
     def test_default_selection_method_is_sampled(self):
         """Test that default selection_method is 'sampled'."""
-        schedule = LinearSchedule(num_timesteps=100)
-        masker = InformationWeightedMasker(noise_schedule=schedule)
+        masker = InformationWeightedMasker(mask_rate=0.15)
         assert masker.selection_method == "sampled"

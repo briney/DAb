@@ -1,7 +1,7 @@
-"""End-to-end tests for diffusion components and model configurations.
+"""End-to-end tests for MLM components and model configurations.
 
 Tests cover:
-1. Static schedule type (MLM-style fixed masking)
+1. Masking behavior with static mask rate
 2. Information-weighted vs Uniform maskers
 3. ChainAwareAttention vs standard MultiHeadAttention
 """
@@ -11,11 +11,7 @@ import pytest
 import torch
 
 from dab.data import create_dataloader
-from dab.diffusion import (
-    InformationWeightedMasker,
-    UniformMasker,
-    create_schedule,
-)
+from dab.masking import InformationWeightedMasker, UniformMasker
 from dab.model import DAbConfig, DAbModel
 from dab.training import compute_masked_cross_entropy, create_optimizer
 
@@ -45,144 +41,6 @@ def training_data(tmp_path):
 
 
 # =============================================================================
-# Static Schedule Tests
-# =============================================================================
-
-
-class TestStaticSchedule:
-    """Tests for static (MLM-style) masking schedule."""
-
-    def test_static_schedule_constant_mask_rate(self):
-        """Verify static schedule returns constant mask rate regardless of timestep."""
-        mask_rate = 0.15
-        schedule = create_schedule("static", num_timesteps=100, mask_rate=mask_rate)
-
-        # Test various timesteps - all should return same mask rate
-        for t in [1, 25, 50, 75, 100]:
-            rate = schedule.get_mask_rate(t)
-            assert rate == mask_rate, f"Expected {mask_rate} at t={t}, got {rate}"
-
-        # Test with tensor input
-        timesteps = torch.tensor([1, 50, 100])
-        rates = schedule.get_mask_rate(timesteps)
-        expected = torch.full((3,), mask_rate)
-        assert torch.allclose(rates, expected), f"Tensor rates mismatch: {rates}"
-
-    def test_static_schedule_training_loop(self, training_data):
-        """Test training with static schedule produces stable masking behavior."""
-        config = DAbConfig(
-            vocab_size=32,
-            d_model=32,
-            n_layers=1,
-            n_heads=1,
-            max_seq_len=128,
-            max_timesteps=100,
-            dropout=0.0,
-        )
-        model = DAbModel(config)
-        model.train()
-
-        dataloader = create_dataloader(
-            data_path=training_data,
-            batch_size=4,
-            max_length=128,
-            shuffle=True,
-            num_workers=0,
-        )
-
-        optimizer = create_optimizer(model, lr=1e-3)
-        # Use static schedule with 15% masking (MLM-style)
-        noise_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.15)
-        masker = UniformMasker(noise_schedule)
-
-        # Track mask counts to verify consistent masking
-        mask_fractions = []
-        losses = []
-
-        for epoch in range(2):
-            for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
-                masked_ids, mask_labels = masker.apply_mask(
-                    token_ids=batch["token_ids"],
-                    timesteps=timesteps,
-                    attention_mask=batch["attention_mask"],
-                    special_tokens_mask=batch["special_tokens_mask"],
-                )
-
-                # Track masking fraction
-                maskable = batch["attention_mask"].bool() & ~batch["special_tokens_mask"].bool()
-                num_maskable = maskable.sum().item()
-                num_masked = mask_labels.sum().item()
-                if num_maskable > 0:
-                    mask_fractions.append(num_masked / num_maskable)
-
-                outputs = model(
-                    token_ids=masked_ids,
-                    chain_ids=batch["chain_ids"],
-                    attention_mask=batch["attention_mask"],
-                )
-
-                loss = compute_masked_cross_entropy(
-                    logits=outputs["logits"],
-                    targets=batch["token_ids"],
-                    mask_labels=mask_labels,
-                )
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                losses.append(loss.item())
-
-        # Verify masking is approximately 15% (with some variance due to rounding)
-        avg_mask_fraction = sum(mask_fractions) / len(mask_fractions)
-        assert 0.10 < avg_mask_fraction < 0.20, (
-            f"Expected ~15% masking, got {avg_mask_fraction:.2%}"
-        )
-
-        # Verify training is stable
-        assert all(loss < 100 for loss in losses), "Training loss exploded"
-        assert losses[-1] < losses[0] * 2, "Loss increased significantly"
-
-    def test_static_vs_cosine_masking_behavior(self):
-        """Compare static and cosine schedule masking behavior via mask rates."""
-        # Static schedule - mask rate should be constant
-        static_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.15)
-
-        # Cosine schedule - mask rate varies by timestep
-        cosine_schedule = create_schedule("cosine", num_timesteps=100)
-
-        # Test at different timesteps - verify mask rates directly
-        timesteps = [10, 50, 90]
-
-        # Static rates should all be 0.15
-        static_rates = [static_schedule.get_mask_rate(t) for t in timesteps]
-        assert all(r == 0.15 for r in static_rates), (
-            f"Static schedule should return constant rate 0.15: {static_rates}"
-        )
-
-        # Cosine rates should increase with timestep
-        cosine_rates = [cosine_schedule.get_mask_rate(t) for t in timesteps]
-        assert cosine_rates[0] < cosine_rates[1] < cosine_rates[2], (
-            f"Cosine should increase with timestep: {cosine_rates}"
-        )
-
-        # Verify with tensor input as well
-        timesteps_tensor = torch.tensor(timesteps)
-        static_tensor_rates = static_schedule.get_mask_rate(timesteps_tensor)
-        expected = torch.full((3,), 0.15)
-        assert torch.allclose(static_tensor_rates, expected), (
-            f"Static tensor rates should all be 0.15: {static_tensor_rates}"
-        )
-
-        cosine_tensor_rates = cosine_schedule.get_mask_rate(timesteps_tensor)
-        assert cosine_tensor_rates[0] < cosine_tensor_rates[1] < cosine_tensor_rates[2], (
-            f"Cosine tensor rates should increase: {cosine_tensor_rates}"
-        )
-
-
-# =============================================================================
 # Masker Type Tests
 # =============================================================================
 
@@ -198,7 +56,6 @@ class TestMaskerTypes:
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
         )
         model = DAbModel(config)
@@ -213,8 +70,7 @@ class TestMaskerTypes:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = UniformMasker(noise_schedule)
+        masker = UniformMasker(mask_rate=0.15)
 
         losses = []
         for epoch in range(3):
@@ -222,12 +78,8 @@ class TestMaskerTypes:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     special_tokens_mask=batch["special_tokens_mask"],
                 )
@@ -265,7 +117,6 @@ class TestMaskerTypes:
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
         )
         model = DAbModel(config)
@@ -280,9 +131,10 @@ class TestMaskerTypes:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
         masker = InformationWeightedMasker(
-            noise_schedule, cdr_weight_multiplier=1.0, nongermline_weight_multiplier=1.0
+            mask_rate=0.15,
+            cdr_weight_multiplier=1.0,
+            nongermline_weight_multiplier=1.0,
         )
 
         losses = []
@@ -291,13 +143,9 @@ class TestMaskerTypes:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 # InformationWeightedMasker supports optional CDR/template masks
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     cdr_mask=None,  # No CDR annotation
                     non_templated_mask=None,
@@ -341,20 +189,18 @@ class TestMaskerTypes:
         batch = next(iter(dataloader))
         batch_size, seq_len = batch["token_ids"].shape
 
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
         masker = InformationWeightedMasker(
-            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=1.0
+            mask_rate=0.15,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=1.0,
         )
 
         # Create a CDR mask marking positions 10-20 as CDR
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         cdr_mask[:, 10:20] = True
 
-        timesteps = torch.full((batch_size,), 25)
-
         masked_ids, mask_labels = masker.apply_mask(
             token_ids=batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=batch["attention_mask"],
             cdr_mask=cdr_mask,
             non_templated_mask=None,
@@ -397,10 +243,11 @@ class TestMaskerTypes:
         batch = next(iter(dataloader))
         batch_size, seq_len = batch["token_ids"].shape
 
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        uniform_masker = UniformMasker(noise_schedule)
+        uniform_masker = UniformMasker(mask_rate=0.15)
         weighted_masker = InformationWeightedMasker(
-            noise_schedule, cdr_weight_multiplier=2.0, nongermline_weight_multiplier=2.0
+            mask_rate=0.15,
+            cdr_weight_multiplier=2.0,
+            nongermline_weight_multiplier=2.0,
         )
 
         # Create CDR and non-templated masks
@@ -410,8 +257,6 @@ class TestMaskerTypes:
         non_templated_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         non_templated_mask[:, 15:22] = True  # Mark some non-templated positions
 
-        timesteps = torch.full((batch_size,), 30)
-
         # Run multiple trials to get statistical significance
         uniform_cdr_fractions = []
         weighted_cdr_fractions = []
@@ -419,14 +264,12 @@ class TestMaskerTypes:
         for _ in range(20):
             _, uniform_labels = uniform_masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 special_tokens_mask=batch["special_tokens_mask"],
             )
 
             _, weighted_labels = weighted_masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 cdr_mask=cdr_mask,
                 non_templated_mask=non_templated_mask,
@@ -470,7 +313,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
             use_chain_aware_attention=True,  # Explicit
         )
@@ -486,8 +328,7 @@ class TestChainAwareAttention:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = UniformMasker(noise_schedule)
+        masker = UniformMasker(mask_rate=0.15)
 
         losses = []
         for epoch in range(3):
@@ -495,12 +336,8 @@ class TestChainAwareAttention:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     special_tokens_mask=batch["special_tokens_mask"],
                 )
@@ -537,7 +374,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
             use_chain_aware_attention=False,  # Disable chain-aware attention
         )
@@ -553,8 +389,7 @@ class TestChainAwareAttention:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = UniformMasker(noise_schedule)
+        masker = UniformMasker(mask_rate=0.15)
 
         losses = []
         for epoch in range(3):
@@ -562,12 +397,8 @@ class TestChainAwareAttention:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     special_tokens_mask=batch["special_tokens_mask"],
                 )
@@ -604,7 +435,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=64,
-            max_timesteps=10,
             dropout=0.0,
             use_chain_aware_attention=True,
         )
@@ -614,7 +444,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=64,
-            max_timesteps=10,
             dropout=0.0,
             use_chain_aware_attention=False,
         )
@@ -652,7 +481,6 @@ class TestChainAwareAttention:
             n_layers=1,
             n_heads=2,
             max_seq_len=64,
-            max_timesteps=10,
             dropout=0.0,
             use_chain_aware_attention=True,
         )
@@ -697,7 +525,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=64,
-            max_timesteps=10,
             dropout=0.0,
             use_chain_aware_attention=True,
         )
@@ -739,7 +566,6 @@ class TestChainAwareAttention:
             n_layers=2,
             n_heads=2,
             max_seq_len=64,
-            max_timesteps=10,
             dropout=0.0,
             use_chain_aware_attention=False,
         )
@@ -777,29 +603,17 @@ class TestChainAwareAttention:
 
 
 class TestCombinedConfigurations:
-    """Tests combining different schedule, masker, and attention configurations."""
+    """Tests combining different masker and attention configurations."""
 
-    @pytest.mark.parametrize(
-        "schedule_type,schedule_kwargs",
-        [
-            ("cosine", {}),
-            ("linear", {}),
-            ("sqrt", {}),
-            ("static", {"mask_rate": 0.15}),
-        ],
-    )
     @pytest.mark.parametrize("use_chain_aware", [True, False])
-    def test_all_schedule_attention_combinations(
-        self, training_data, schedule_type, schedule_kwargs, use_chain_aware
-    ):
-        """Test training with all combinations of schedules and attention types."""
+    def test_masker_attention_combinations(self, training_data, use_chain_aware):
+        """Test training with both masker types and attention configurations."""
         config = DAbConfig(
             vocab_size=32,
             d_model=32,
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
             use_chain_aware_attention=use_chain_aware,
         )
@@ -815,22 +629,15 @@ class TestCombinedConfigurations:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule(
-            schedule_type, num_timesteps=50, **schedule_kwargs
-        )
-        masker = UniformMasker(noise_schedule)
+        masker = UniformMasker(mask_rate=0.15)
 
         # Train for 1 epoch
         epoch_loss = 0.0
         num_batches = 0
 
         for batch in dataloader:
-            batch_size = batch["token_ids"].shape[0]
-            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
             masked_ids, mask_labels = masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 special_tokens_mask=batch["special_tokens_mask"],
             )
@@ -855,10 +662,7 @@ class TestCombinedConfigurations:
             num_batches += 1
 
         avg_loss = epoch_loss / num_batches
-        assert avg_loss < 100, (
-            f"Loss too high for {schedule_type} + "
-            f"chain_aware={use_chain_aware}: {avg_loss}"
-        )
+        assert avg_loss < 100, f"Loss too high for chain_aware={use_chain_aware}: {avg_loss}"
 
     @pytest.mark.parametrize("masker_type", ["uniform", "information_weighted"])
     @pytest.mark.parametrize("use_chain_aware", [True, False])
@@ -872,7 +676,6 @@ class TestCombinedConfigurations:
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
             use_chain_aware_attention=use_chain_aware,
         )
@@ -888,32 +691,26 @@ class TestCombinedConfigurations:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
 
         if masker_type == "uniform":
-            masker = UniformMasker(noise_schedule)
+            masker = UniformMasker(mask_rate=0.15)
         else:
-            masker = InformationWeightedMasker(noise_schedule)
+            masker = InformationWeightedMasker(mask_rate=0.15)
 
         # Train for 1 epoch
         epoch_loss = 0.0
         num_batches = 0
 
         for batch in dataloader:
-            batch_size = batch["token_ids"].shape[0]
-            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
             if masker_type == "uniform":
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     special_tokens_mask=batch["special_tokens_mask"],
                 )
             else:
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     cdr_mask=None,
                     non_templated_mask=None,
@@ -941,91 +738,7 @@ class TestCombinedConfigurations:
 
         avg_loss = epoch_loss / num_batches
         assert avg_loss < 100, (
-            f"Loss too high for {masker_type} + "
-            f"chain_aware={use_chain_aware}: {avg_loss}"
-        )
-
-    @pytest.mark.parametrize("selection_method", ["ranked", "sampled"])
-    @pytest.mark.parametrize(
-        "schedule_type,schedule_kwargs",
-        [
-            ("cosine", {}),
-            ("linear", {}),
-            ("sqrt", {}),
-            ("static", {"mask_rate": 0.15}),
-        ],
-    )
-    def test_all_selection_schedule_combinations(
-        self, training_data, selection_method, schedule_type, schedule_kwargs
-    ):
-        """Test training with all combinations of selection methods and schedules."""
-        config = DAbConfig(
-            vocab_size=32,
-            d_model=32,
-            n_layers=1,
-            n_heads=1,
-            max_seq_len=128,
-            max_timesteps=50,
-            dropout=0.0,
-        )
-        model = DAbModel(config)
-        model.train()
-
-        dataloader = create_dataloader(
-            data_path=training_data,
-            batch_size=4,
-            max_length=128,
-            shuffle=True,
-            num_workers=0,
-        )
-
-        optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule(schedule_type, num_timesteps=50, **schedule_kwargs)
-        masker = InformationWeightedMasker(
-            noise_schedule,
-            cdr_weight_multiplier=2.0,
-            nongermline_weight_multiplier=1.0,
-            selection_method=selection_method,
-        )
-
-        epoch_loss = 0.0
-        num_batches = 0
-
-        for batch in dataloader:
-            batch_size = batch["token_ids"].shape[0]
-            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
-            masked_ids, mask_labels = masker.apply_mask(
-                token_ids=batch["token_ids"],
-                timesteps=timesteps,
-                attention_mask=batch["attention_mask"],
-                cdr_mask=None,
-                non_templated_mask=None,
-                special_tokens_mask=batch["special_tokens_mask"],
-            )
-
-            outputs = model(
-                token_ids=masked_ids,
-                chain_ids=batch["chain_ids"],
-                attention_mask=batch["attention_mask"],
-            )
-
-            loss = compute_masked_cross_entropy(
-                logits=outputs["logits"],
-                targets=batch["token_ids"],
-                mask_labels=mask_labels,
-            )
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            epoch_loss += loss.item()
-            num_batches += 1
-
-        avg_loss = epoch_loss / num_batches
-        assert avg_loss < 100, (
-            f"Loss too high for {selection_method} + {schedule_type}: {avg_loss}"
+            f"Loss too high for {masker_type} + chain_aware={use_chain_aware}: {avg_loss}"
         )
 
 
@@ -1045,7 +758,6 @@ class TestSelectionMethods:
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
         )
         model = DAbModel(config)
@@ -1060,9 +772,8 @@ class TestSelectionMethods:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
@@ -1074,12 +785,8 @@ class TestSelectionMethods:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     cdr_mask=None,
                     non_templated_mask=None,
@@ -1118,7 +825,6 @@ class TestSelectionMethods:
             n_layers=1,
             n_heads=1,
             max_seq_len=128,
-            max_timesteps=50,
             dropout=0.0,
         )
         model = DAbModel(config)
@@ -1133,9 +839,8 @@ class TestSelectionMethods:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=2.0,
             nongermline_weight_multiplier=1.0,
             selection_method="ranked",
@@ -1147,12 +852,8 @@ class TestSelectionMethods:
             num_batches = 0
 
             for batch in dataloader:
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     cdr_mask=None,
                     non_templated_mask=None,
@@ -1196,9 +897,8 @@ class TestSelectionMethods:
         batch = next(iter(dataloader))
         batch_size, seq_len = batch["token_ids"].shape
 
-        noise_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.15)
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.15,
             cdr_weight_multiplier=3.0,
             nongermline_weight_multiplier=1.0,
             selection_method="sampled",
@@ -1214,10 +914,8 @@ class TestSelectionMethods:
         num_trials = 10
 
         for _ in range(num_trials):
-            timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
             _, mask_labels = masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 cdr_mask=cdr_mask,
                 non_templated_mask=None,
@@ -1249,9 +947,8 @@ class TestSelectionMethods:
         batch = next(iter(dataloader))
         batch_size, seq_len = batch["token_ids"].shape
 
-        noise_schedule = create_schedule("static", num_timesteps=100, mask_rate=0.10)
         masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=0.10,
             cdr_weight_multiplier=5.0,  # High weight for CDR
             nongermline_weight_multiplier=1.0,
             selection_method="ranked",
@@ -1261,10 +958,8 @@ class TestSelectionMethods:
         cdr_mask = torch.zeros(batch_size, seq_len, dtype=torch.long)
         cdr_mask[:, 10:25] = 1  # 15 CDR positions
 
-        timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
         _, mask_labels = masker.apply_mask(
             token_ids=batch["token_ids"],
-            timesteps=timesteps,
             attention_mask=batch["attention_mask"],
             cdr_mask=cdr_mask,
             non_templated_mask=None,
@@ -1285,3 +980,209 @@ class TestSelectionMethods:
             assert cdr_fraction > 0.7, (
                 f"Ranked selection should prioritize CDR positions, got {cdr_fraction:.2%}"
             )
+
+
+# =============================================================================
+# Mask Rate Tests
+# =============================================================================
+
+
+class TestMaskRates:
+    """Tests for different mask rate configurations."""
+
+    @pytest.mark.parametrize("mask_rate", [0.05, 0.15, 0.30, 0.50])
+    def test_different_mask_rates(self, training_data, mask_rate):
+        """Test that different mask rates produce valid training."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=32,
+            n_layers=1,
+            n_heads=1,
+            max_seq_len=128,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.train()
+
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=4,
+            max_length=128,
+            shuffle=True,
+            num_workers=0,
+        )
+
+        optimizer = create_optimizer(model, lr=1e-3)
+        masker = UniformMasker(mask_rate=mask_rate)
+
+        # Train for a few batches
+        losses = []
+        for batch in dataloader:
+            masked_ids, mask_labels = masker.apply_mask(
+                token_ids=batch["token_ids"],
+                attention_mask=batch["attention_mask"],
+                special_tokens_mask=batch["special_tokens_mask"],
+            )
+
+            outputs = model(
+                token_ids=masked_ids,
+                chain_ids=batch["chain_ids"],
+                attention_mask=batch["attention_mask"],
+            )
+
+            loss = compute_masked_cross_entropy(
+                logits=outputs["logits"],
+                targets=batch["token_ids"],
+                mask_labels=mask_labels,
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses.append(loss.item())
+
+            if len(losses) >= 5:
+                break
+
+        assert all(not torch.isnan(torch.tensor(loss)) for loss in losses)
+        assert all(loss < 100 for loss in losses)
+
+    def test_mask_rate_approximately_achieved(self, training_data):
+        """Test that the actual mask rate is close to the configured rate."""
+        dataloader = create_dataloader(
+            data_path=training_data,
+            batch_size=8,
+            max_length=128,
+            shuffle=False,
+            num_workers=0,
+        )
+
+        batch = next(iter(dataloader))
+
+        for target_rate in [0.10, 0.15, 0.25]:
+            masker = UniformMasker(mask_rate=target_rate)
+
+            total_masked = 0
+            total_maskable = 0
+
+            for _ in range(10):
+                _, mask_labels = masker.apply_mask(
+                    token_ids=batch["token_ids"],
+                    attention_mask=batch["attention_mask"],
+                    special_tokens_mask=batch["special_tokens_mask"],
+                )
+
+                special_mask = batch["special_tokens_mask"].bool()
+                maskable = batch["attention_mask"].bool() & ~special_mask
+
+                total_masked += mask_labels.sum().item()
+                total_maskable += maskable.sum().item()
+
+            actual_rate = total_masked / total_maskable
+            # Should be within 5% of target
+            assert abs(actual_rate - target_rate) < 0.05, (
+                f"Actual rate {actual_rate:.2%} differs from target {target_rate:.2%}"
+            )
+
+
+# =============================================================================
+# Predict Masked Tests
+# =============================================================================
+
+
+class TestPredictMasked:
+    """Tests for the predict_masked inference method."""
+
+    def test_predict_masked_fills_masks(self):
+        """Test that predict_masked fills in MASK tokens."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            max_seq_len=64,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.eval()
+
+        # Create input with some MASK tokens
+        batch_size, seq_len = 2, 32
+        token_ids = torch.randint(4, 28, (batch_size, seq_len))
+        token_ids[:, 0] = 0  # CLS
+        token_ids[:, -1] = 2  # EOS
+
+        chain_ids = torch.zeros(batch_size, seq_len, dtype=torch.long)
+        chain_ids[:, seq_len // 2 :] = 1
+
+        # Mask some positions
+        original_tokens = token_ids.clone()
+        mask_positions = torch.tensor([5, 6, 7, 10, 15])
+        token_ids[:, mask_positions] = 31  # MASK token ID
+
+        with torch.no_grad():
+            predicted = model.predict_masked(token_ids, chain_ids)
+
+        # Check that masked positions are filled
+        for pos in mask_positions:
+            assert (predicted[:, pos] != 31).all(), f"Position {pos} should be filled"
+
+        # Check that unmasked positions are preserved
+        unmasked_positions = [i for i in range(seq_len) if i not in mask_positions]
+        for pos in unmasked_positions:
+            assert torch.equal(predicted[:, pos], original_tokens[:, pos])
+
+    def test_predict_masked_with_temperature(self):
+        """Test predict_masked with different temperature values."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            max_seq_len=64,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.eval()
+
+        token_ids = torch.randint(4, 28, (1, 16))
+        token_ids[:, 5:10] = 31  # MASK
+        chain_ids = torch.zeros(1, 16, dtype=torch.long)
+
+        with torch.no_grad():
+            # Low temperature
+            predicted_low = model.predict_masked(
+                token_ids.clone(), chain_ids, temperature=0.1
+            )
+            # High temperature
+            predicted_high = model.predict_masked(
+                token_ids.clone(), chain_ids, temperature=2.0
+            )
+
+        # Both should produce valid token IDs
+        assert (predicted_low >= 0).all() and (predicted_low < 32).all()
+        assert (predicted_high >= 0).all() and (predicted_high < 32).all()
+
+    def test_predict_masked_with_top_k(self):
+        """Test predict_masked with top-k filtering."""
+        config = DAbConfig(
+            vocab_size=32,
+            d_model=64,
+            n_layers=2,
+            n_heads=2,
+            max_seq_len=64,
+            dropout=0.0,
+        )
+        model = DAbModel(config)
+        model.eval()
+
+        token_ids = torch.randint(4, 28, (1, 16))
+        token_ids[:, 5:10] = 31  # MASK
+        chain_ids = torch.zeros(1, 16, dtype=torch.long)
+
+        with torch.no_grad():
+            predicted = model.predict_masked(token_ids.clone(), chain_ids, top_k=5)
+
+        # Should produce valid token IDs
+        assert (predicted >= 0).all() and (predicted < 32).all()

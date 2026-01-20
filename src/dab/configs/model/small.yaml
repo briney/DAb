@@ -10,8 +10,6 @@ d_ffn: null
 ffn_multiplier: null
 
 max_seq_len: 320
-max_timesteps: 100
-use_timestep_embedding: false
 
 dropout: 0.1
 attention_dropout: 0.1

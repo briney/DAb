@@ -14,7 +14,6 @@ def small_config() -> DAbConfig:
         n_layers=2,
         n_heads=2,
         max_seq_len=64,
-        max_timesteps=10,
         dropout=0.0,
         attention_dropout=0.0,
         embedding_dropout=0.0,

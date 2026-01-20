@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from dab.data import create_dataloader
-from dab.diffusion import UniformMasker, create_schedule
+from dab.masking import UniformMasker
 from dab.model import DAbConfig, DAbModel
 from dab.training import (
     CheckpointConfig,
@@ -53,7 +53,6 @@ def small_model():
         n_layers=1,
         n_heads=1,
         max_seq_len=128,
-        max_timesteps=50,
         dropout=0.0,
         attention_dropout=0.0,
         embedding_dropout=0.0,
@@ -77,8 +76,7 @@ class TestMiniTrainingLoop:
         )
 
         optimizer = create_optimizer(model, lr=1e-3)
-        noise_schedule = create_schedule("cosine", num_timesteps=50)
-        masker = UniformMasker(noise_schedule)
+        masker = UniformMasker(mask_rate=0.15)
 
         # Track losses
         losses = []
@@ -90,12 +88,8 @@ class TestMiniTrainingLoop:
 
             for batch in dataloader:
                 # Masking
-                batch_size = batch["token_ids"].shape[0]
-                timesteps = noise_schedule.sample_timesteps(batch_size, device="cpu")
-
                 masked_ids, mask_labels = masker.apply_mask(
                     token_ids=batch["token_ids"],
-                    timesteps=timesteps,
                     attention_mask=batch["attention_mask"],
                     special_tokens_mask=batch["special_tokens_mask"],
                 )

@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from ..tokenizer import tokenizer
 from .embeddings import DAbEmbedding
 from .layers import TransformerEncoder
 from .normalization import RMSNorm
@@ -31,8 +32,6 @@ class DAbConfig:
     head_dim: int | None = None
 
     max_seq_len: int = 320
-    max_timesteps: int = 100
-    use_timestep_embedding: bool = False
 
     dropout: float = 0.1
     attention_dropout: float = 0.1
@@ -95,7 +94,7 @@ class DAbConfig:
 
 class DAbModel(nn.Module):
     """
-    Discrete Diffusion Antibody Language Model.
+    Antibody Language Model with masked language modeling objective.
 
     Pre-norm transformer with RoPE, SwiGLU, and hybrid self/cross attention.
     """
@@ -108,8 +107,6 @@ class DAbModel(nn.Module):
             vocab_size=config.vocab_size,
             d_model=config.d_model,
             padding_idx=config.padding_idx,
-            max_timesteps=config.max_timesteps,
-            use_timestep_embedding=config.use_timestep_embedding,
             dropout=config.embedding_dropout,
         )
 
@@ -155,7 +152,6 @@ class DAbModel(nn.Module):
         token_ids: Tensor,
         chain_ids: Tensor,
         attention_mask: Tensor | None = None,
-        timesteps: Tensor | None = None,
         output_hidden_states: bool = False,
         output_attentions: bool = False,
     ) -> dict[str, Tensor | tuple[Tensor, ...]]:
@@ -166,7 +162,6 @@ class DAbModel(nn.Module):
             token_ids: Input token IDs of shape (batch, seq_len)
             chain_ids: Chain identity tensor of shape (batch, seq_len)
             attention_mask: Optional padding mask of shape (batch, seq_len)
-            timesteps: Optional diffusion timesteps of shape (batch,)
             output_hidden_states: If True, return all hidden states (n_layers + 1 tensors)
             output_attentions: If True, return attention weights from all layers
 
@@ -177,7 +172,7 @@ class DAbModel(nn.Module):
                 - "all_hidden_states": (optional) Tuple of n_layers + 1 hidden state tensors
                 - "attentions": (optional) Tuple of n_layers attention weight tensors
         """
-        embedded = self.embeddings(token_ids, timesteps)
+        embedded = self.embeddings(token_ids)
 
         # Call encoder with appropriate flags
         encoder_outputs = self.encoder(
@@ -214,6 +209,67 @@ class DAbModel(nn.Module):
 
         return output
 
+    @torch.no_grad()
+    def predict_masked(
+        self,
+        token_ids: Tensor,
+        chain_ids: Tensor,
+        attention_mask: Tensor | None = None,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        top_p: float | None = None,
+    ) -> Tensor:
+        """
+        Predict tokens at masked positions in a single forward pass.
+
+        Args:
+            token_ids: Input with MASK tokens at positions to predict
+            chain_ids: Chain identity tensor
+            attention_mask: Optional attention mask
+            temperature: Sampling temperature (1.0 = no change)
+            top_k: If set, only sample from top-k tokens
+            top_p: If set, use nucleus sampling
+
+        Returns:
+            Token IDs with masked positions filled by predictions
+        """
+        outputs = self.forward(token_ids, chain_ids, attention_mask)
+        logits = outputs["logits"]
+
+        # Apply temperature
+        if temperature != 1.0:
+            logits = logits / temperature
+
+        # Apply top-k filtering
+        if top_k is not None:
+            top_k_values, _ = torch.topk(logits, min(top_k, logits.size(-1)), dim=-1)
+            threshold = top_k_values[..., -1:]
+            logits = logits.masked_fill(logits < threshold, float("-inf"))
+
+        # Apply top-p (nucleus) filtering
+        if top_p is not None:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
+            cumulative_probs = torch.softmax(sorted_logits, dim=-1).cumsum(dim=-1)
+            sorted_mask = cumulative_probs > top_p
+            sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+            sorted_mask[..., 0] = False
+            indices_to_remove = sorted_mask.scatter(-1, sorted_indices, sorted_mask)
+            logits = logits.masked_fill(indices_to_remove, float("-inf"))
+
+        # Sample from distribution
+        probs = torch.softmax(logits, dim=-1)
+        batch_size, seq_len, vocab_size = probs.shape
+        predicted = torch.multinomial(probs.view(-1, vocab_size), 1)
+        predicted = predicted.view(batch_size, seq_len)
+
+        # Only replace MASK tokens
+        mask_token_id = tokenizer.mask_token_id
+        result = token_ids.clone()
+        mask_positions = token_ids == mask_token_id
+        result[mask_positions] = predicted[mask_positions]
+
+        return result
+
     def get_num_params(self, non_embedding: bool = True) -> int:
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
@@ -235,7 +291,12 @@ class DAbModel(nn.Module):
                 "    model.load_state_dict(checkpoint['model_state_dict'])"
             )
 
-        config = DAbConfig(**checkpoint["config"])
+        config_dict = checkpoint["config"]
+        # Handle legacy checkpoints with timestep-related fields
+        config_dict.pop("max_timesteps", None)
+        config_dict.pop("use_timestep_embedding", None)
+
+        config = DAbConfig(**config_dict)
         model = cls(config)
         model.load_state_dict(checkpoint["model_state_dict"])
         return model

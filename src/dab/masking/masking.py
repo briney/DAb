@@ -1,4 +1,4 @@
-"""Information-weighted masking for discrete diffusion."""
+"""Masking strategies for MLM training."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import torch
 from torch import Tensor
 
 from ..tokenizer import tokenizer
-from .noise_schedule import NoiseSchedule
 
 
 class InformationWeightedMasker:
@@ -28,13 +27,15 @@ class InformationWeightedMasker:
 
     def __init__(
         self,
-        noise_schedule: NoiseSchedule,
+        mask_rate: float = 0.15,
         cdr_weight_multiplier: float = 1.0,
         nongermline_weight_multiplier: float = 1.0,
         mask_token_id: int = tokenizer.mask_token_id,
         selection_method: str = "sampled",
     ) -> None:
-        self.noise_schedule = noise_schedule
+        if not 0.0 < mask_rate < 1.0:
+            raise ValueError(f"mask_rate must be in (0, 1), got {mask_rate}")
+        self.mask_rate = mask_rate
         self.cdr_weight_multiplier = cdr_weight_multiplier
         self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.mask_token_id = mask_token_id
@@ -71,7 +72,6 @@ class InformationWeightedMasker:
     def apply_mask(
         self,
         token_ids: Tensor,
-        timesteps: Tensor,
         attention_mask: Tensor,
         cdr_mask: Tensor | None = None,
         non_templated_mask: Tensor | None = None,
@@ -81,14 +81,13 @@ class InformationWeightedMasker:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device
 
-        mask_rates = self.noise_schedule.get_mask_rate(timesteps)
         valid_counts = attention_mask.sum(dim=-1)
 
         if special_tokens_mask is not None:
             special_counts = (special_tokens_mask & attention_mask.bool()).sum(dim=-1)
             valid_counts = valid_counts - special_counts
 
-        num_to_mask = (valid_counts.float() * mask_rates).round().long().clamp(min=0)
+        num_to_mask = (valid_counts.float() * self.mask_rate).round().long().clamp(min=0)
 
         maskable_positions = attention_mask.bool().clone()
         if special_tokens_mask is not None:
@@ -136,16 +135,17 @@ class UniformMasker:
 
     def __init__(
         self,
-        noise_schedule: NoiseSchedule,
+        mask_rate: float = 0.15,
         mask_token_id: int = tokenizer.mask_token_id,
     ) -> None:
-        self.noise_schedule = noise_schedule
+        if not 0.0 < mask_rate < 1.0:
+            raise ValueError(f"mask_rate must be in (0, 1), got {mask_rate}")
+        self.mask_rate = mask_rate
         self.mask_token_id = mask_token_id
 
     def apply_mask(
         self,
         token_ids: Tensor,
-        timesteps: Tensor,
         attention_mask: Tensor,
         special_tokens_mask: Tensor | None = None,
         generator: torch.Generator | None = None,
@@ -153,14 +153,13 @@ class UniformMasker:
         batch_size, seq_len = token_ids.shape
         device = token_ids.device
 
-        mask_rates = self.noise_schedule.get_mask_rate(timesteps)
         rand = torch.rand(batch_size, seq_len, device=device, generator=generator)
 
         maskable = attention_mask.bool()
         if special_tokens_mask is not None:
             maskable = maskable & ~special_tokens_mask.bool()
 
-        mask_labels = (rand < mask_rates.unsqueeze(-1)) & maskable
+        mask_labels = (rand < self.mask_rate) & maskable
 
         masked_ids = token_ids.clone()
         masked_ids[mask_labels] = self.mask_token_id

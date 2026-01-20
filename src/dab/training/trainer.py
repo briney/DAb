@@ -11,17 +11,16 @@ from accelerate import Accelerator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from ..diffusion import InformationWeightedMasker, NoiseSchedule, UniformMasker
+from ..masking import InformationWeightedMasker, UniformMasker
 from ..model import DAbModel
 from .checkpoint import CheckpointConfig, CheckpointManager
 from .flops import FLOPsConfig, FLOPsTracker
 from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
 from .metrics import (
-    DiffusionMetrics,
+    MLMMetrics,
     MetricAccumulator,
-    compute_diffusion_metrics,
     compute_masked_cross_entropy,
-    compute_weighted_masked_cross_entropy,
+    compute_mlm_metrics,
 )
 from .optimizer import create_optimizer, create_scheduler, get_lr
 
@@ -52,23 +51,12 @@ class TrainingConfig:
     warmup_steps: int = 1000
     min_lr_ratio: float = 0.1
 
-    # Diffusion
-    noise_schedule: str = "cosine"
-    num_timesteps: int = 100
-    power: float = 4.0  # Only used when noise_schedule="power"
+    # Masking
+    mask_rate: float = 0.15
     use_information_weighted_masking: bool = True
     cdr_weight_multiplier: float = 1.0
     nongermline_weight_multiplier: float = 1.0
     masking_selection: str = "sampled"  # "ranked" | "sampled"
-
-    # Curriculum learning for timestep sampling
-    use_curriculum: bool = False
-    curriculum_start: float = 0.1  # Start with 10% of timestep range
-
-    # Loss objective
-    loss_objective: str = "mlm"  # "mlm" (uniform) | "nelbo" (weighted)
-    nelbo_weight_normalize: str | None = None  # None | "clip" | "minmax"
-    nelbo_weight_clip_max: float = 10.0
 
     # Intervals (in steps)
     log_steps: int = 10
@@ -97,7 +85,6 @@ class Trainer:
         train_dataloader: DataLoader,
         eval_dataloader: DataLoader | None = None,
         eval_dataloaders: dict[str, DataLoader] | None = None,
-        noise_schedule: NoiseSchedule | None = None,
         evaluator: "Evaluator | None" = None,
         accelerator: Accelerator | None = None,
         masking_frequency_config: MaskingFrequencyConfig | None = None,
@@ -155,20 +142,14 @@ class Trainer:
         # Store evaluator for advanced metrics
         self.evaluator = evaluator
 
-        if noise_schedule is None:
-            from ..diffusion import create_schedule
-
-            noise_schedule = create_schedule(
-                config.noise_schedule, config.num_timesteps, power=config.power
-            )
-
+        # Initialize maskers with mask_rate directly
         self.masker = InformationWeightedMasker(
-            noise_schedule,
+            mask_rate=config.mask_rate,
             cdr_weight_multiplier=config.cdr_weight_multiplier,
             nongermline_weight_multiplier=config.nongermline_weight_multiplier,
             selection_method=config.masking_selection,
         )
-        self.uniform_masker = UniformMasker(noise_schedule)
+        self.uniform_masker = UniformMasker(mask_rate=config.mask_rate)
 
         checkpoint_config = CheckpointConfig(
             save_dir=config.checkpoint_dir,
@@ -191,7 +172,7 @@ class Trainer:
         self.steps_per_epoch = len(self.train_dataloader)
         self.logger = None
 
-        # Compute total steps for curriculum learning progress tracking
+        # Compute total steps for progress tracking
         if config.max_epochs is not None:
             self.total_steps = config.max_epochs * self.steps_per_epoch
         else:
@@ -224,27 +205,11 @@ class Trainer:
 
     def _apply_masking(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Apply masking to a batch."""
-        device = batch["token_ids"].device
-        batch_size = batch["token_ids"].shape[0]
-
-        # Compute training progress for curriculum learning
-        training_progress = None
-        if self.config.use_curriculum:
-            training_progress = self.global_step / max(1, self.total_steps)
-
-        timesteps = self.masker.noise_schedule.sample_timesteps(
-            batch_size,
-            device,
-            training_progress=training_progress,
-            curriculum_start=self.config.curriculum_start,
-        )
-
         if self.config.use_information_weighted_masking and (
             batch.get("cdr_mask") is not None or batch.get("non_templated_mask") is not None
         ):
             masked_ids, mask_labels = self.masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 cdr_mask=batch.get("cdr_mask"),
                 non_templated_mask=batch.get("non_templated_mask"),
@@ -253,20 +218,19 @@ class Trainer:
         else:
             masked_ids, mask_labels = self.uniform_masker.apply_mask(
                 token_ids=batch["token_ids"],
-                timesteps=timesteps,
                 attention_mask=batch["attention_mask"],
                 special_tokens_mask=batch.get("special_tokens_mask"),
             )
 
-        return {"masked_ids": masked_ids, "mask_labels": mask_labels, "timesteps": timesteps}
+        return {"masked_ids": masked_ids, "mask_labels": mask_labels}
 
     def training_step(
         self, batch: dict[str, torch.Tensor]
-    ) -> tuple[torch.Tensor, DiffusionMetrics]:
+    ) -> tuple[torch.Tensor, MLMMetrics]:
         """Execute a single training step.
 
         Returns:
-            Tuple of (loss tensor for backprop, DiffusionMetrics with all metrics).
+            Tuple of (loss tensor for backprop, MLMMetrics with all metrics).
         """
         mask_output = self._apply_masking(batch)
 
@@ -279,33 +243,19 @@ class Trainer:
             attention_mask=batch["attention_mask"],
         )
 
-        metrics = compute_diffusion_metrics(
+        metrics = compute_mlm_metrics(
             logits=outputs["logits"],
             targets=batch["token_ids"],
             mask_labels=mask_output["mask_labels"],
             attention_mask=batch["attention_mask"],
         )
 
-        # Recompute loss tensor for backprop (metrics.loss is a float)
-        if self.config.loss_objective == "nelbo":
-            # Compute NELBO weights for each sample based on its timestep
-            timestep_weights = self.masker.noise_schedule.get_normalized_nelbo_weight(
-                mask_output["timesteps"],
-                normalize=self.config.nelbo_weight_normalize,
-                clip_max=self.config.nelbo_weight_clip_max,
-            )
-            loss = compute_weighted_masked_cross_entropy(
-                logits=outputs["logits"],
-                targets=batch["token_ids"],
-                mask_labels=mask_output["mask_labels"],
-                timestep_weights=timestep_weights,
-            )
-        else:
-            loss = compute_masked_cross_entropy(
-                logits=outputs["logits"],
-                targets=batch["token_ids"],
-                mask_labels=mask_output["mask_labels"],
-            )
+        # Compute loss tensor for backprop (metrics.loss is a float)
+        loss = compute_masked_cross_entropy(
+            logits=outputs["logits"],
+            targets=batch["token_ids"],
+            mask_labels=mask_output["mask_labels"],
+        )
 
         return loss, metrics
 
@@ -331,7 +281,7 @@ class Trainer:
                 attention_mask=batch["attention_mask"],
             )
 
-            metrics = compute_diffusion_metrics(
+            metrics = compute_mlm_metrics(
                 logits=outputs["logits"],
                 targets=batch["token_ids"],
                 mask_labels=mask_output["mask_labels"],
@@ -402,7 +352,7 @@ class Trainer:
                     attention_mask=batch["attention_mask"],
                 )
 
-                metrics = compute_diffusion_metrics(
+                metrics = compute_mlm_metrics(
                     logits=outputs["logits"],
                     targets=batch["token_ids"],
                     mask_labels=mask_output["mask_labels"],

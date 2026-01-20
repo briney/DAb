@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch import Tensor
 
-from ..diffusion.masking import InformationWeightedMasker, UniformMasker
-from ..diffusion.noise_schedule import create_schedule
+from ..masking import InformationWeightedMasker, UniformMasker
 from ..tokenizer import tokenizer
 
 if TYPE_CHECKING:
@@ -20,19 +19,15 @@ class EvalMasker:
 
     Wraps UniformMasker or InformationWeightedMasker with:
     - Configurable masking strategy (uniform vs information-weighted)
-    - Configurable schedule (static vs diffusion schedules)
+    - Configurable mask rate
     - Seeded random generation for reproducibility
 
     Parameters
     ----------
     masker_type
         Type of masking: "uniform" or "information_weighted".
-    schedule_type
-        Type of schedule: "static", "cosine", "linear", "sqrt".
     mask_rate
-        Target mask rate for static schedule (0.0-1.0).
-    num_timesteps
-        Number of timesteps for diffusion schedules.
+        Target mask rate (0.0-1.0).
     cdr_weight_multiplier
         Weight multiplier for CDR positions in information-weighted masking.
     nongermline_weight_multiplier
@@ -46,39 +41,28 @@ class EvalMasker:
     def __init__(
         self,
         masker_type: str = "uniform",
-        schedule_type: str = "static",
         mask_rate: float = 0.15,
-        num_timesteps: int = 100,
         cdr_weight_multiplier: float = 1.0,
         nongermline_weight_multiplier: float = 1.0,
         seed: int = 42,
         selection_method: str = "sampled",
     ) -> None:
         self.masker_type = masker_type
-        self.schedule_type = schedule_type
         self.mask_rate = mask_rate
-        self.num_timesteps = num_timesteps
         self.cdr_weight_multiplier = cdr_weight_multiplier
         self.nongermline_weight_multiplier = nongermline_weight_multiplier
         self.seed = seed
         self.selection_method = selection_method
 
-        # Create noise schedule
-        self.noise_schedule = create_schedule(
-            schedule_type=schedule_type,
-            num_timesteps=num_timesteps,
-            mask_rate=mask_rate,
-        )
-
         # Create underlying masker
         if masker_type == "uniform":
             self._masker = UniformMasker(
-                noise_schedule=self.noise_schedule,
+                mask_rate=mask_rate,
                 mask_token_id=tokenizer.mask_token_id,
             )
         elif masker_type == "information_weighted":
             self._masker = InformationWeightedMasker(
-                noise_schedule=self.noise_schedule,
+                mask_rate=mask_rate,
                 cdr_weight_multiplier=cdr_weight_multiplier,
                 nongermline_weight_multiplier=nongermline_weight_multiplier,
                 mask_token_id=tokenizer.mask_token_id,
@@ -111,36 +95,6 @@ class EvalMasker:
         gen.manual_seed(self.seed)
         return gen
 
-    def sample_timesteps(
-        self,
-        batch_size: int,
-        device: torch.device,
-        generator: torch.Generator | None = None,
-    ) -> Tensor:
-        """Sample timesteps with optional seeded generator.
-
-        Parameters
-        ----------
-        batch_size
-            Number of timesteps to sample.
-        device
-            Device to create timesteps on.
-        generator
-            Optional seeded generator for reproducibility.
-
-        Returns
-        -------
-        Tensor
-            Sampled timesteps of shape (batch_size,).
-        """
-        return torch.randint(
-            1,
-            self.num_timesteps + 1,
-            (batch_size,),
-            device=device,
-            generator=generator,
-        )
-
     def apply_mask(
         self,
         batch: dict[str, Tensor],
@@ -169,17 +123,11 @@ class EvalMasker:
         token_ids = batch["token_ids"]
         attention_mask = batch["attention_mask"]
         special_tokens_mask = batch.get("special_tokens_mask")
-        batch_size = token_ids.shape[0]
-        device = token_ids.device
-
-        # Sample timesteps (with generator for reproducibility)
-        timesteps = self.sample_timesteps(batch_size, device, generator)
 
         # Apply masking based on masker type
         if self.masker_type == "uniform":
             return self._masker.apply_mask(
                 token_ids=token_ids,
-                timesteps=timesteps,
                 attention_mask=attention_mask,
                 special_tokens_mask=special_tokens_mask,
                 generator=generator,
@@ -188,7 +136,6 @@ class EvalMasker:
             # Information-weighted masking
             return self._masker.apply_mask(
                 token_ids=token_ids,
-                timesteps=timesteps,
                 attention_mask=attention_mask,
                 cdr_mask=batch.get("cdr_mask"),
                 non_templated_mask=batch.get("non_templated_mask"),
@@ -205,9 +152,7 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
     cfg
         Configuration with keys:
         - type: "uniform" or "information_weighted"
-        - schedule: "static", "cosine", "linear", "sqrt"
-        - mask_rate: float (for static schedule)
-        - num_timesteps: int
+        - mask_rate: float
         - cdr_weight_multiplier: float (for information_weighted)
         - nongermline_weight_multiplier: float (for information_weighted)
         - seed: int
@@ -220,9 +165,7 @@ def create_eval_masker(cfg: DictConfig) -> EvalMasker:
     """
     return EvalMasker(
         masker_type=cfg.get("type", "uniform"),
-        schedule_type=cfg.get("schedule", "static"),
         mask_rate=cfg.get("mask_rate", 0.15),
-        num_timesteps=cfg.get("num_timesteps", 100),
         cdr_weight_multiplier=cfg.get("cdr_weight_multiplier", 1.0),
         nongermline_weight_multiplier=cfg.get("nongermline_weight_multiplier", 1.0),
         seed=cfg.get("seed", 42),

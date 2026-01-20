@@ -53,12 +53,10 @@ class TestEvalMasker:
         """Test creating a uniform masker."""
         masker = EvalMasker(
             masker_type="uniform",
-            schedule_type="static",
             mask_rate=0.15,
             seed=42,
         )
         assert masker.masker_type == "uniform"
-        assert masker.schedule_type == "static"
         assert masker.mask_rate == 0.15
         assert masker.seed == 42
 
@@ -66,7 +64,6 @@ class TestEvalMasker:
         """Test creating an information-weighted masker."""
         masker = EvalMasker(
             masker_type="information_weighted",
-            schedule_type="static",
             mask_rate=0.15,
             cdr_weight_multiplier=1.5,
             nongermline_weight_multiplier=2.0,
@@ -78,7 +75,7 @@ class TestEvalMasker:
 
     def test_reproducibility_with_seed(self, sample_batch):
         """Test that same seed produces same masks."""
-        masker = EvalMasker(masker_type="uniform", schedule_type="static", mask_rate=0.15, seed=42)
+        masker = EvalMasker(masker_type="uniform", mask_rate=0.15, seed=42)
 
         device = sample_batch["token_ids"].device
 
@@ -95,8 +92,8 @@ class TestEvalMasker:
 
     def test_different_seeds_different_masks(self, sample_batch):
         """Test that different seeds produce different masks."""
-        masker1 = EvalMasker(masker_type="uniform", schedule_type="static", mask_rate=0.15, seed=42)
-        masker2 = EvalMasker(masker_type="uniform", schedule_type="static", mask_rate=0.15, seed=123)
+        masker1 = EvalMasker(masker_type="uniform", mask_rate=0.15, seed=42)
+        masker2 = EvalMasker(masker_type="uniform", mask_rate=0.15, seed=123)
 
         device = sample_batch["token_ids"].device
 
@@ -110,10 +107,9 @@ class TestEvalMasker:
         assert not torch.equal(mask_labels_1, mask_labels_2)
 
     def test_mask_rate_respected(self, sample_batch):
-        """Test that static schedule respects mask_rate."""
+        """Test that mask_rate is approximately respected."""
         masker = EvalMasker(
             masker_type="uniform",
-            schedule_type="static",
             mask_rate=0.3,  # 30%
             seed=42,
         )
@@ -138,7 +134,6 @@ class TestEvalMasker:
         """Test that special tokens (CLS, EOS) are never masked."""
         masker = EvalMasker(
             masker_type="uniform",
-            schedule_type="static",
             mask_rate=0.5,  # High rate to ensure masking
             seed=42,
         )
@@ -160,25 +155,41 @@ class TestEvalMasker:
         cfg = OmegaConf.create(
             {
                 "type": "uniform",
-                "schedule": "static",
                 "mask_rate": 0.2,
-                "num_timesteps": 100,
                 "seed": 123,
             }
         )
 
         masker = create_eval_masker(cfg)
         assert masker.masker_type == "uniform"
-        assert masker.schedule_type == "static"
         assert masker.mask_rate == 0.2
         assert masker.seed == 123
+
+    def test_create_eval_masker_information_weighted(self):
+        """Test creating information-weighted EvalMasker from config."""
+        cfg = OmegaConf.create(
+            {
+                "type": "information_weighted",
+                "mask_rate": 0.15,
+                "cdr_weight_multiplier": 2.0,
+                "nongermline_weight_multiplier": 1.5,
+                "selection_method": "sampled",
+                "seed": 42,
+            }
+        )
+
+        masker = create_eval_masker(cfg)
+        assert masker.masker_type == "information_weighted"
+        assert masker.mask_rate == 0.15
+        assert masker.cdr_weight_multiplier == 2.0
+        assert masker.nongermline_weight_multiplier == 1.5
+        assert masker.selection_method == "sampled"
 
     def test_information_weighted_biases_cdr(self, sample_batch):
         """Test that information-weighted masker biases toward CDR positions."""
         # Use high mask rate to see clear bias
         masker = EvalMasker(
             masker_type="information_weighted",
-            schedule_type="static",
             mask_rate=0.2,
             cdr_weight_multiplier=2.0,  # Strong CDR bias
             nongermline_weight_multiplier=1.0,
@@ -216,14 +227,15 @@ class TestEvalMasker:
         # CDR positions should be masked more frequently
         assert cdr_rate > non_cdr_rate
 
-    def test_diffusion_schedule_types(self, sample_batch):
-        """Test that different schedule types work."""
-        for schedule_type in ["static", "linear", "cosine", "sqrt"]:
+    def test_selection_methods(self, sample_batch):
+        """Test both ranked and sampled selection methods work."""
+        for selection_method in ["ranked", "sampled"]:
             masker = EvalMasker(
-                masker_type="uniform",
-                schedule_type=schedule_type,
+                masker_type="information_weighted",
                 mask_rate=0.15,
-                num_timesteps=100,
+                cdr_weight_multiplier=1.5,
+                nongermline_weight_multiplier=1.0,
+                selection_method=selection_method,
                 seed=42,
             )
 
