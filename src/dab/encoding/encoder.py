@@ -51,9 +51,7 @@ class DAbEncoder:
         else:
             self.pooling = pooling
 
-        self.collator = AntibodyCollator(
-            max_length=model.config.max_seq_len, pad_to_max=False
-        )
+        self.collator = AntibodyCollator(max_length=model.config.max_seq_len, pad_to_max=False)
 
     @classmethod
     def from_pretrained(
@@ -92,14 +90,9 @@ class DAbEncoder:
             "light_non_templated_mask": None,
         }
         batch = self.collator([example])
-        return {
-            k: v.to(self.device) if isinstance(v, Tensor) else v
-            for k, v in batch.items()
-        }
+        return {k: v.to(self.device) if isinstance(v, Tensor) else v for k, v in batch.items()}
 
-    def _prepare_batch(
-        self, heavy_chains: list[str], light_chains: list[str]
-    ) -> dict[str, Tensor]:
+    def _prepare_batch(self, heavy_chains: list[str], light_chains: list[str]) -> dict[str, Tensor]:
         """Prepare a batch of sequence pairs for encoding."""
         examples = [
             {
@@ -113,10 +106,7 @@ class DAbEncoder:
             for h, l in zip(heavy_chains, light_chains)
         ]
         batch = self.collator(examples)
-        return {
-            k: v.to(self.device) if isinstance(v, Tensor) else v
-            for k, v in batch.items()
-        }
+        return {k: v.to(self.device) if isinstance(v, Tensor) else v for k, v in batch.items()}
 
     @torch.no_grad()
     def encode(
@@ -287,12 +277,12 @@ class DAbEncoder:
         chain_ids = chain_ids[:seq_len]
 
         # Heavy chain: positions where chain_id == 0, excluding CLS (position 0)
-        heavy_mask = (chain_ids == 0)
+        heavy_mask = chain_ids == 0
         heavy_mask[0] = False  # Exclude CLS
         heavy_logits = logits[heavy_mask]
 
         # Light chain: positions where chain_id == 1, excluding EOS (last position)
-        light_mask = (chain_ids == 1)
+        light_mask = chain_ids == 1
         light_mask[seq_len - 1] = False  # Exclude EOS
         light_logits = logits[light_mask]
 
@@ -361,17 +351,15 @@ class DAbEncoder:
         mask_positions = token_ids[:seq_len] == tokenizer.mask_token_id
         if mask_positions.any():
             predictions = logits[:seq_len].argmax(dim=-1)
-            token_ids[:seq_len] = torch.where(
-                mask_positions, predictions, token_ids[:seq_len]
-            )
+            token_ids[:seq_len] = torch.where(mask_positions, predictions, token_ids[:seq_len])
 
         # Split into heavy and light chains
         # Heavy: chain_id == 0, excluding CLS (position 0)
         # Light: chain_id == 1, excluding EOS (last position)
-        heavy_mask = (chain_ids[:seq_len] == 0)
+        heavy_mask = chain_ids[:seq_len] == 0
         heavy_mask[0] = False  # Exclude CLS
 
-        light_mask = (chain_ids[:seq_len] == 1)
+        light_mask = chain_ids[:seq_len] == 1
         light_mask[seq_len - 1] = False  # Exclude EOS
 
         heavy_ids = token_ids[:seq_len][heavy_mask].tolist()
