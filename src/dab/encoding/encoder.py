@@ -293,6 +293,94 @@ class DAbEncoder:
         }
 
     @torch.no_grad()
+    def get_attentions(
+        self,
+        heavy_chain: str,
+        light_chain: str,
+        layer: int | list[int] | None = None,
+    ) -> dict[str, Tensor | tuple[Tensor, ...]]:
+        """Get attention weights for all positions.
+
+        Parameters
+        ----------
+        heavy_chain
+            Heavy chain amino acid sequence.
+        light_chain
+            Light chain amino acid sequence.
+        layer
+            Which layer(s) to return attention from.
+            - None (default): Return attention from all layers as a tuple
+            - int: Return attention from a single layer (negative indexing supported,
+              e.g., -1 for last layer)
+            - list[int]: Return attention from specified layers as a tuple
+              (negative indexing supported)
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'attentions': Attention tensor(s). Shape depends on `layer` parameter:
+              - If layer is None: tuple of n_layers tensors, each (n_heads, seq_len, seq_len)
+              - If layer is int: single tensor of shape (n_heads, seq_len, seq_len)
+              - If layer is list: tuple of len(layer) tensors, each (n_heads, seq_len, seq_len)
+            - 'n_layers': Total number of layers in the model (int)
+            - 'seq_len': Actual sequence length excluding padding (int)
+
+        Raises
+        ------
+        IndexError
+            If layer index is out of range for the model.
+        """
+        batch = self._prepare_input(heavy_chain, light_chain)
+
+        outputs = self.model(
+            token_ids=batch["token_ids"],
+            chain_ids=batch["chain_ids"],
+            attention_mask=batch["attention_mask"],
+            output_attentions=True,
+        )
+
+        all_attentions = outputs["attentions"]
+        n_layers = self.model.config.n_layers
+
+        attention_mask = batch["attention_mask"][0]
+        seq_len = int(attention_mask.sum().item())
+
+        # Remove batch dimension and trim to actual sequence length
+        trimmed_attentions = tuple(
+            attn[0, :, :seq_len, :seq_len] for attn in all_attentions
+        )
+
+        # Handle layer selection
+        if layer is None:
+            result_attentions: Tensor | tuple[Tensor, ...] = trimmed_attentions
+        elif isinstance(layer, int):
+            try:
+                result_attentions = trimmed_attentions[layer]
+            except IndexError:
+                raise IndexError(
+                    f"Layer index {layer} is out of range for model with {n_layers} layers. "
+                    f"Valid range: {-n_layers} to {n_layers - 1}"
+                )
+        else:
+            selected = []
+            for idx in layer:
+                try:
+                    selected.append(trimmed_attentions[idx])
+                except IndexError:
+                    raise IndexError(
+                        f"Layer index {idx} is out of range for model with {n_layers} layers. "
+                        f"Valid range: {-n_layers} to {n_layers - 1}"
+                    )
+            result_attentions = tuple(selected)
+
+        return {
+            "attentions": result_attentions,
+            "n_layers": n_layers,
+            "seq_len": seq_len,
+        }
+
+    @torch.no_grad()
     def predict(
         self,
         heavy_chain: str,

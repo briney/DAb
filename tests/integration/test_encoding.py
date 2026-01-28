@@ -158,3 +158,60 @@ class TestEncoderBatching:
         )
 
         assert embeddings.shape == (100, 64)
+
+
+class TestGetAttentions:
+    """Tests for the get_attentions method."""
+
+    def test_get_attentions_all_layers(self, encoder):
+        """Test getting attention from all layers (default)."""
+        heavy = "EVQLVESGGGLVQPGRSLRLSCAAS"
+        light = "DIQMTQSPSSVSASVGDRVTITC"
+
+        result = encoder.get_attentions(heavy, light)
+
+        assert "attentions" in result
+        assert "n_layers" in result
+        assert "seq_len" in result
+
+        attentions = result["attentions"]
+        n_layers = result["n_layers"]
+        seq_len = result["seq_len"]
+
+        assert isinstance(attentions, tuple)
+        assert len(attentions) == n_layers
+        assert n_layers == 2  # small_model has 2 layers
+
+        expected_seq_len = 1 + len(heavy) + len(light) + 1
+        assert seq_len == expected_seq_len
+        for attn in attentions:
+            assert attn.shape == (2, seq_len, seq_len)  # 2 heads
+
+    def test_get_attentions_single_layer(self, encoder):
+        """Test getting attention from a single layer."""
+        result = encoder.get_attentions("EVQLVES", "DIQMTQ", layer=0)
+        assert isinstance(result["attentions"], torch.Tensor)
+        assert result["attentions"].ndim == 3
+
+    def test_get_attentions_negative_index(self, encoder):
+        """Test negative indexing for last layer."""
+        result_last = encoder.get_attentions("EVQLVES", "DIQMTQ", layer=-1)
+        result_explicit = encoder.get_attentions("EVQLVES", "DIQMTQ", layer=1)
+        assert torch.allclose(result_last["attentions"], result_explicit["attentions"])
+
+    def test_get_attentions_layer_list(self, encoder):
+        """Test getting attention from multiple layers."""
+        result = encoder.get_attentions("EVQLVES", "DIQMTQ", layer=[0, -1])
+        assert isinstance(result["attentions"], tuple)
+        assert len(result["attentions"]) == 2
+
+    def test_get_attentions_invalid_layer_raises(self, encoder):
+        """Test out-of-range layer index raises IndexError."""
+        with pytest.raises(IndexError, match="out of range"):
+            encoder.get_attentions("EVQLVES", "DIQMTQ", layer=10)
+
+    def test_get_attentions_sums_to_one(self, encoder):
+        """Test attention weights sum to 1 along key dimension."""
+        result = encoder.get_attentions("EVQLVES", "DIQMTQ", layer=0)
+        attn_sums = result["attentions"].sum(dim=-1)
+        assert torch.allclose(attn_sums, torch.ones_like(attn_sums), atol=1e-5)
