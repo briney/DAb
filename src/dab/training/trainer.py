@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 import torch
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from ..masking import InformationWeightedMasker, UniformMasker
 from ..model import DAbModel
+from ..utils.progress import create_progress
 from .checkpoint import CheckpointConfig, CheckpointManager
 from .flops import FLOPsConfig, FLOPsTracker
 from .masking_frequency import MaskingFrequencyConfig, MaskingFrequencyTracker
@@ -268,29 +268,26 @@ class Trainer:
         self.model.eval()
         eval_metrics = MetricAccumulator()
 
-        for batch in tqdm(
-            self.eval_dataloader,
-            desc="Evaluating",
-            disable=not self.accelerator.is_local_main_process,
-        ):
-            mask_output = self._apply_masking(batch)
+        with create_progress(disable=not self.accelerator.is_local_main_process) as progress:
+            for batch in progress.track(self.eval_dataloader, description="Evaluating"):
+                mask_output = self._apply_masking(batch)
 
-            outputs = self.model(
-                token_ids=mask_output["masked_ids"],
-                chain_ids=batch["chain_ids"],
-                attention_mask=batch["attention_mask"],
-            )
+                outputs = self.model(
+                    token_ids=mask_output["masked_ids"],
+                    chain_ids=batch["chain_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
 
-            metrics = compute_mlm_metrics(
-                logits=outputs["logits"],
-                targets=batch["token_ids"],
-                mask_labels=mask_output["mask_labels"],
-                attention_mask=batch["attention_mask"],
-            )
+                metrics = compute_mlm_metrics(
+                    logits=outputs["logits"],
+                    targets=batch["token_ids"],
+                    mask_labels=mask_output["mask_labels"],
+                    attention_mask=batch["attention_mask"],
+                )
 
-            eval_metrics.update("loss", metrics.loss)
-            eval_metrics.update("accuracy", metrics.accuracy)
-            eval_metrics.update("perplexity", metrics.perplexity)
+                eval_metrics.update("loss", metrics.loss)
+                eval_metrics.update("accuracy", metrics.accuracy)
+                eval_metrics.update("perplexity", metrics.perplexity)
 
         self.model.train()
 
@@ -336,32 +333,33 @@ class Trainer:
             eval_tracker = self.eval_masking_frequency_trackers[eval_name]
             eval_tracker.reset()
 
-            for batch in tqdm(
-                eval_loader,
-                desc=f"Eval ({eval_name})",
+            with create_progress(
                 disable=not self.accelerator.is_local_main_process,
-            ):
-                mask_output = self._apply_masking(batch)
+            ) as eval_progress:
+                for batch in eval_progress.track(
+                    eval_loader, description=f"Eval ({eval_name})"
+                ):
+                    mask_output = self._apply_masking(batch)
 
-                # Track masking frequency for eval
-                eval_tracker.update(mask_output["mask_labels"], batch)
+                    # Track masking frequency for eval
+                    eval_tracker.update(mask_output["mask_labels"], batch)
 
-                outputs = self.model(
-                    token_ids=mask_output["masked_ids"],
-                    chain_ids=batch["chain_ids"],
-                    attention_mask=batch["attention_mask"],
-                )
+                    outputs = self.model(
+                        token_ids=mask_output["masked_ids"],
+                        chain_ids=batch["chain_ids"],
+                        attention_mask=batch["attention_mask"],
+                    )
 
-                metrics = compute_mlm_metrics(
-                    logits=outputs["logits"],
-                    targets=batch["token_ids"],
-                    mask_labels=mask_output["mask_labels"],
-                    attention_mask=batch["attention_mask"],
-                )
+                    metrics = compute_mlm_metrics(
+                        logits=outputs["logits"],
+                        targets=batch["token_ids"],
+                        mask_labels=mask_output["mask_labels"],
+                        attention_mask=batch["attention_mask"],
+                    )
 
-                eval_metrics.update("loss", metrics.loss)
-                eval_metrics.update("accuracy", metrics.accuracy)
-                eval_metrics.update("perplexity", metrics.perplexity)
+                    eval_metrics.update("loss", metrics.loss)
+                    eval_metrics.update("accuracy", metrics.accuracy)
+                    eval_metrics.update("perplexity", metrics.perplexity)
 
             all_results[eval_name] = {
                 "loss": eval_metrics.compute("loss"),
@@ -389,13 +387,12 @@ class Trainer:
 
         self.accelerator.print(f"Starting training for {total_steps} steps...")
 
-        progress_bar = tqdm(
-            total=total_steps,
-            desc="Training",
+        progress = create_progress(
             disable=not self.accelerator.is_local_main_process,
             file=sys.stdout,  # Explicit stdout for proper flushing with accelerate
         )
-        progress_bar.update(self.global_step)
+        progress.start()
+        task_id = progress.add_task("Training", total=total_steps, completed=self.global_step)
 
         while self.global_step < total_steps:
             for batch in self.train_dataloader:
@@ -416,7 +413,7 @@ class Trainer:
                     self.scheduler.step()
                     self.global_step += 1
                     self.epoch = self.global_step / self.steps_per_epoch
-                    progress_bar.update(1)
+                    progress.advance(task_id)
 
                     self.metrics.update("train/loss", step_metrics.loss)
                     self.metrics.update("train/accuracy", step_metrics.accuracy)
@@ -510,7 +507,7 @@ class Trainer:
                     if self.global_step >= total_steps:
                         break
 
-        progress_bar.close()
+        progress.stop()
 
         # Final evaluation - all processes must participate (distributed dataloaders require it)
         if self.eval_dataloaders:

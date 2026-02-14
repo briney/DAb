@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
-from tqdm import tqdm
 
 from ..tokenizer import tokenizer
+from ..utils.progress import create_progress
 from .regions import AntibodyRegion, extract_region_masks
 
 if TYPE_CHECKING:
@@ -96,13 +96,12 @@ class PerPositionEvaluator:
         results: dict[int, dict[str, float]] = {}
 
         self.model.eval()
-        with torch.no_grad():
-            # Process positions in batches
-            iterator = range(0, len(positions), self.position_batch_size)
-            if self.show_progress:
-                iterator = tqdm(iterator, desc="Per-position eval")
-
-            for batch_start in iterator:
+        position_range = range(0, len(positions), self.position_batch_size)
+        with (
+            torch.no_grad(),
+            create_progress(disable=not self.show_progress) as progress,
+        ):
+            for batch_start in progress.track(position_range, description="Per-position eval"):
                 batch_positions = positions[batch_start : batch_start + self.position_batch_size]
                 batch_size = len(batch_positions)
 

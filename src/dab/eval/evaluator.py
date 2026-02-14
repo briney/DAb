@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
+from ..utils.progress import create_progress
 from .base import Metric
 from .masking import EvalMasker, create_eval_masker
 from .per_position import PerPositionEvaluator, RegionMaskingEvaluator
@@ -216,8 +216,8 @@ class Evaluator:
         if self.eval_masker is not None:
             generator = self.eval_masker.get_generator(device)
 
-        with torch.no_grad():
-            for batch in tqdm(eval_loader, desc=f"Eval ({eval_name})", disable=not show_progress):
+        with torch.no_grad(), create_progress(disable=not show_progress) as progress:
+            for batch in progress.track(eval_loader, description=f"Eval ({eval_name})"):
                 # Move batch to device if not using accelerator
                 if self.accelerator is None:
                     batch = {
@@ -558,10 +558,8 @@ class Evaluator:
             generator = self.eval_masker.get_generator(device)
 
         self.model.eval()
-        with torch.no_grad():
-            for batch in tqdm(
-                eval_loader, desc="Region eval (standard)", disable=not self._show_progress()
-            ):
+        with torch.no_grad(), create_progress(disable=not self._show_progress()) as progress:
+            for batch in progress.track(eval_loader, description="Region eval (standard)"):
                 # Move batch to device if not using accelerator
                 if self.accelerator is None:
                     batch = {
@@ -731,7 +729,7 @@ class Evaluator:
             model=self.model,
             position_batch_size=position_batch_size,
             device=device,
-            show_progress=False,  # Outer tqdm handles progress
+            show_progress=False,  # Outer progress bar handles progress
         )
 
         # Accumulate results across all samples
@@ -748,9 +746,9 @@ class Evaluator:
         warned_missing_mask = False
 
         self.model.eval()
-        with torch.no_grad():
-            for batch in tqdm(
-                eval_loader, desc="Region eval (per-position)", disable=not self._show_progress()
+        with torch.no_grad(), create_progress(disable=not self._show_progress()) as progress:
+            for batch in progress.track(
+                eval_loader, description="Region eval (per-position)"
             ):
                 # Process each sample in the batch individually
                 batch_size = batch["token_ids"].shape[0]
@@ -944,9 +942,9 @@ class Evaluator:
         warned_missing_mask = False
 
         self.model.eval()
-        with torch.no_grad():
-            for batch in tqdm(
-                eval_loader, desc="Region eval (region-level)", disable=not self._show_progress()
+        with torch.no_grad(), create_progress(disable=not self._show_progress()) as progress:
+            for batch in progress.track(
+                eval_loader, description="Region eval (region-level)"
             ):
                 # Process each sample in the batch individually
                 batch_size = batch["token_ids"].shape[0]
